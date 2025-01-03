@@ -16,8 +16,13 @@ from score import get_score_and_cliques
 
 class AdjacencyMatrixFlippingEnv(gym.Env):
     """Custom Environment for flipping entries in the adjacency matrix. The agent receives a binary vector and suggests a bit to flip."""
-    def __init__(self, n, dir="", model_id=0, r=3, b=3, logger=None):
+    def __init__(self, n, dir="", model_id=0, r=6, b=4, logger=None):
         super(AdjacencyMatrixFlippingEnv, self).__init__()
+        
+        self.reward_factor = None # Factor with which we normalize the rewards
+        self.max_steps = 10 # Maximum number of steps per episode TODO: Check if this is a good value
+        self.not_connected_punishment = -10000 # Punishment for not connected graphs TODO: Check if this is a good value
+        
         # Define action and observation space
         self.num_entries = n*(n-1)//2
         self.action_space = spaces.Discrete(self.num_entries)
@@ -27,59 +32,68 @@ class AdjacencyMatrixFlippingEnv(gym.Env):
         self.b = b
         self.observation_space_np = np.random.randint(2, size=self.num_entries)
         self.best_observation_space = np.copy(self.observation_space_np)    
-        self.best_recorded_score = -float("inf")
-        
-        self.reward_factor = None # Factor with which we normalize the rewards
-        self.max_steps = 10 # Maximum number of steps per episode TODO: Check if this is a good value
-        self.not_connected_punishment = -100 # Punishment for not connected graphs TODO: Check if this is a good value
+        self.best_recorded_score, _, _, _ = get_score_and_cliques(obs_space_to_graph(self.observation_space_np, self.n), self.r, self.b, self.not_connected_punishment)
         
         self.dir = dir
         self.model_id = model_id
         self.graph_storage_file = os.path.join(self.dir, f"graphs_{self.model_id}.g6")
         self.logger = logger
-        self.iteration_count = 0
+        self.iteration_count = 0 # Total iteration count
+        self.step_count = 0 # Iteration count per episode
         
 
     def step(self, action):
-        self.observation_space_np[action] = 1-self.observation_space_np[action]
+        # Flip the selected bit in the observation space
+        self.observation_space_np[action] = 1 - self.observation_space_np[action]
         G = obs_space_to_graph(self.observation_space_np, self.n)
+        
+        # Compute the new score after the agent's action
         score, cliques_r, cliques_b, is_connected = get_score_and_cliques(G, self.r, self.b, self.not_connected_punishment)
+        
         if not is_connected:
-            return self.observation_space_np, self.not_connected_punishment, True, False, {}
+            # Apply a strong negative reward if the graph is disconnected
+            reward = self.not_connected_punishment
+            done = True  # End the episode
+            return self.observation_space_np, reward, done, False, {}
         
-        done = self.step_count > self.max_steps
-        if self.reward_factor is None:
-            self.reward_factor = int(score/10.0) #To Do: check if this is a good reward factor
-        reward = self.reward_factor/(self.reward_factor+score)
-        if not done:
-            #reward /= self.max_steps
-            reward = 0 #It seems to be a bit better not to give any reward for intermediate steps, however we still compute it to search for the best state     
-        if score >= self.best_recorded_score:
-            self.best_observation_space = np.copy(self.observation_space_np) #Update state even if score is equal to avoid getting stuck in local minima
+        # Compute reward based on the change in score
+        if hasattr(self, 'previous_score'):
+            reward = score - self.previous_score
+        else:
+            reward = 0  # No reward for the first action
         
+        # Update the previous score for the next step
+        self.previous_score = score
+        
+        # Check if the episode should end
         self.iteration_count += 1
+        self.step_count += 1
+        done = self.step_count >= self.max_steps
+        
+        # Update the best recorded score and state
+        if score > self.best_recorded_score:
+            self.best_recorded_score = score
+            self.best_observation_space = np.copy(self.observation_space_np)
+    
         info = {}
-        # graph6_str = nx.to_graph6_bytes(G).decode('utf-8')
-        # if graph6_str not in self.encountered_graphs:
-        #     if chromatic_number >= self.min_chromatic_number_threshold and embed_dim <= self.max_embed_dim_threshold:
-        #         self.encountered_graphs.add(graph6_str)
-        #         # Store the graph by appending graph_storage_file
-        #         with open(self.graph_storage_file, "a") as f:
-        #             f.write(graph6_str + "\n")
-        #             # f.write(str(action) + "\n")
-        #         # The graphs can now be loaded via graphs = nx.read_graph6('graphs_0.g6')
-            
-
-        # # Log chromatic number and max clique size
-        # if self.logger is not None:
-        #     self.logger.record("env/chromatic_number", chromatic_number)
-        #     self.logger.dump(self.iteration_count)
-
-        return self.observation_space_np, reward, True, False, info
+    
+        # Log the current score if a logger is available
+        if self.logger is not None:
+            self.logger.record("env/score", score)
+            self.logger.record("env/reward", reward)
+            self.logger.record("env/best_score", self.best_recorded_score)
+            self.logger.dump(self.iteration_count)
+        
+        return self.observation_space_np, reward, done, False, info
         
     def reset(self, **kwargs):
         self.observation_space_np = np.copy(self.best_observation_space)
         self.step_count = 0
+        
+        # Recalculate the score for the reset state
+        G = obs_space_to_graph(self.observation_space_np, self.n)
+        self.previous_score = self.best_recorded_score
+        
         return self.observation_space_np, {}
     
 def flattened_off_diagonal_to_adjacency_matrix(flattened_off_diagonal: npt.ArrayLike, n: int) -> npt.ArrayLike:

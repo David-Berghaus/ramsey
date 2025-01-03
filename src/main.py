@@ -12,7 +12,7 @@ import numpy as np
 from env import AdjacencyMatrixFlippingEnv
 
 
-def train_model(model_id, n=30, lr=5e-5, policy="MlpPolicy", algorithm="PPO", torch_num_threads=8, iteration_training_steps=100000, model_path=None):
+def train_model(model_id, n=35, lr=5e-5, policy="MlpPolicy", algorithm="PPO", torch_num_threads=8, iteration_training_steps=100000, model_path=None):
     base_dir = "data/"
     time_stamp = datetime.now().strftime("%d_%m_%Y__%H_%M_%S") # Unique timestamp for each model
     base_path = base_dir + str(n) + "/" + "/" + algorithm + "/" + time_stamp + "/"
