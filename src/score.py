@@ -16,3 +16,11 @@ def get_cliques_and_count(G_nx, k): #See: https://stackoverflow.com/a/58782120
             count += comb(len(clique), k, exact=True)
     return cliques, count
 
+def get_score_and_cliques(G_nx, r, b, not_connected_punishment):
+    G_complement = complement(G_nx)
+    if not is_connected(G_nx) or not is_connected(G_complement):
+        return not_connected_punishment, [], [], False
+    cliques_r, count_r = get_cliques_and_count(G_nx, r)
+    cliques_b, count_b = get_cliques_and_count(G_complement, b)
+    score = -(count_r + count_b)
+    return score, cliques_r, cliques_b, True

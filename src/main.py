@@ -9,7 +9,7 @@ import torch
 import os
 import numpy as np
 
-from env import CustomGraphGANEnv
+from env import AdjacencyMatrixFlippingEnv
 
 
 def train_model(model_id, n=30, lr=5e-5, policy="MlpPolicy", algorithm="PPO", torch_num_threads=8, iteration_training_steps=100000, model_path=None):
@@ -27,7 +27,7 @@ def train_model(model_id, n=30, lr=5e-5, policy="MlpPolicy", algorithm="PPO", to
     torch.manual_seed(seed)
 
     # Create the environment and pass the seed if possible
-    E = CustomGraphGANEnv(n, dir=base_path, model_id=model_id, logger=new_logger)
+    E = AdjacencyMatrixFlippingEnv(n, dir=base_path, model_id=model_id, logger=new_logger)
     E = Monitor(E)
 
     policy_kwargs = dict(activation_fn=torch.nn.ReLU, net_arch=dict(pi=[256, 256], vf=[256, 256])) # Updated format
