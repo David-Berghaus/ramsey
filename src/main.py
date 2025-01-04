@@ -10,9 +10,18 @@ import os
 import numpy as np
 
 from env import AdjacencyMatrixFlippingEnv
+from model import CustomFeatureExtractor
 
 
 def train_model(model_id, n=35, lr=5e-5, policy="MlpPolicy", algorithm="PPO", torch_num_threads=8, iteration_training_steps=100000, model_path=None):
+    # Parameters
+    n = 35
+    r = 4
+    b = 6
+    not_connected_punishment = -10000
+    features_dim = 256
+    
+    
     base_dir = "data/"
     time_stamp = datetime.now().strftime("%d_%m_%Y__%H_%M_%S") # Unique timestamp for each model
     base_path = base_dir + str(n) + "/" + "/" + algorithm + "/" + time_stamp + "/"
@@ -27,10 +36,15 @@ def train_model(model_id, n=35, lr=5e-5, policy="MlpPolicy", algorithm="PPO", to
     torch.manual_seed(seed)
 
     # Create the environment and pass the seed if possible
-    E = AdjacencyMatrixFlippingEnv(n, dir=base_path, model_id=model_id, logger=new_logger)
+    E = AdjacencyMatrixFlippingEnv(n, r, b, not_connected_punishment, dir=base_path, model_id=model_id, logger=new_logger)
     E = Monitor(E)
 
-    policy_kwargs = dict(activation_fn=torch.nn.ReLU, net_arch=dict(pi=[256, 256], vf=[256, 256])) # Updated format
+    policy_kwargs = dict(
+        activation_fn=torch.nn.ReLU,
+        net_arch=dict(pi=[128, 128], vf=[128, 128]),
+        features_extractor_class=CustomFeatureExtractor,
+        features_extractor_kwargs=dict(n=n, r=r, b=b, not_connected_punishment=not_connected_punishment, features_dim=features_dim)
+   )
 
     model = get_model(algorithm, model_path, E, lr=lr, policy=policy, policy_kwargs=policy_kwargs)
     

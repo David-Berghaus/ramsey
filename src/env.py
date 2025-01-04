@@ -16,12 +16,12 @@ from score import get_score_and_cliques
 
 class AdjacencyMatrixFlippingEnv(gym.Env):
     """Custom Environment for flipping entries in the adjacency matrix. The agent receives a binary vector and suggests a bit to flip."""
-    def __init__(self, n, dir="", model_id=0, r=6, b=4, logger=None):
+    def __init__(self, n, r, b, not_connected_punishment, dir="", model_id=0, logger=None):
         super(AdjacencyMatrixFlippingEnv, self).__init__()
         
         self.reward_factor = None # Factor with which we normalize the rewards
         self.max_steps = 10 # Maximum number of steps per episode TODO: Check if this is a good value
-        self.not_connected_punishment = -10000 # Punishment for not connected graphs TODO: Check if this is a good value
+        self.not_connected_punishment = not_connected_punishment # Punishment for not connected graphs TODO: Check if this is a good value
         
         # Define action and observation space
         self.num_entries = n*(n-1)//2
