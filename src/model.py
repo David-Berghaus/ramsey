@@ -22,6 +22,7 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
         self.not_connected_punishment = not_connected_punishment
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
+        # Some hyperparameters
         embed_dim = 128
         num_heads = 2
         self.node_attention_context_len = 10
@@ -84,22 +85,25 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
         self.clique_downward_projection_2 = nn.Linear(self.clique_attention_context_len*embed_dim, embed_dim)
         
         
-
     def forward(self, observations):
-        assert observations.shape[0] == 1, "Only batch size 1 is supported at this point"
-        G = obs_space_to_graph(observations[0], self.n)
-        _, cliques_r, cliques_b, _ = get_score_and_cliques(G, self.r, self.b, self.not_connected_punishment)
-        
-        node_embeddings_1 = self.node_embeddings(True) #[n, embed_dim]
-        clique_embeddings_1 = self.clique_attention_encoder(True, node_embeddings_1, cliques_r) # [num_cliques_r, embed_dim]
-        graph_embedding_1 = self.graph_attention_encoder(True, clique_embeddings_1) # [embed_dim]
-        
-        node_embeddings_2 = self.node_embeddings(False) #[n, embed_dim]
-        clique_embeddings_2 = self.clique_attention_encoder(False, node_embeddings_2, cliques_b) # [num_cliques_b, embed_dim]
-        graph_embedding_2 = self.graph_attention_encoder(False, clique_embeddings_2) # [embed_dim]
+        graph_embeddings = []
+        for observation in observations:
+            G = obs_space_to_graph(observation, self.n)
+            _, cliques_r, cliques_b, _ = get_score_and_cliques(G, self.r, self.b, self.not_connected_punishment)
+            
+            node_embeddings_1 = self.node_embeddings(True) #[n, embed_dim]
+            clique_embeddings_1 = self.clique_attention_encoder(True, node_embeddings_1, cliques_r) # [num_cliques_r, embed_dim]
+            graph_embedding_1 = self.graph_attention_encoder(True, clique_embeddings_1) # [embed_dim]
+            
+            node_embeddings_2 = self.node_embeddings(False) #[n, embed_dim]
+            clique_embeddings_2 = self.clique_attention_encoder(False, node_embeddings_2, cliques_b) # [num_cliques_b, embed_dim]
+            graph_embedding_2 = self.graph_attention_encoder(False, clique_embeddings_2) # [embed_dim]
 
-        graph_embedding = torch.cat([graph_embedding_1, graph_embedding_2], dim=0)
-        return graph_embedding
+            graph_embedding = torch.cat([graph_embedding_1, graph_embedding_2], dim=0)
+            graph_embeddings.append(graph_embedding)
+        graph_embeddings = torch.stack(graph_embeddings)
+        return graph_embeddings
+    
     
     def node_embeddings(self, use_r):
         nodes_one_hot = torch.zeros(self.n, self.n, device=self.device, dtype=torch.float32)
@@ -109,6 +113,7 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
             return self.node_embedder_1(nodes_one_hot)
         else:
             return self.node_embedder_2(nodes_one_hot)
+       
         
     def clique_attention_encoder(self, use_r, node_embeddings, cliques):
         """
@@ -200,6 +205,7 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
         original_embeddings = torch.stack(original_embeddings)
         key_padding_masks = torch.stack(key_padding_masks)
         return queries, keys, values, original_embeddings, key_padding_masks
+    
     
     def graph_attention_encoder(self, use_r, clique_embeddings):
         """
