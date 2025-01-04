@@ -172,8 +172,8 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
                 K_clique = torch.cat([K_clique, torch.zeros(self.node_attention_context_len - len(clique), K_clique.shape[1], device=self.device)])
                 V_clique = torch.cat([V_clique, torch.zeros(self.node_attention_context_len - len(clique), V_clique.shape[1], device=self.device)])
                 original_embedding = torch.cat([original_embedding, torch.zeros(self.node_attention_context_len - len(clique), original_embedding.shape[1], device=self.device)])
-                key_padding_mask = torch.zeros(self.node_attention_context_len, device=self.device)
-                key_padding_mask[len(clique):] = 1
+                key_padding_mask = torch.zeros(self.node_attention_context_len, dtype=torch.bool, device=self.device)
+                key_padding_mask[len(clique):] = True
             else:
                 key_padding_mask = None
                 if len(clique) > self.node_attention_context_len:
@@ -213,8 +213,8 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
                 K = torch.cat([K, torch.zeros(self.clique_attention_context_len - num_cliques, K.shape[1], device=self.device)])
                 V = torch.cat([V, torch.zeros(self.clique_attention_context_len - num_cliques, V.shape[1], device=self.device)])
                 original_embeddings = torch.cat([clique_embeddings, torch.zeros(self.clique_attention_context_len - num_cliques, clique_embeddings.shape[1], device=self.device)])
-                key_padding_mask = torch.zeros(self.clique_attention_context_len, device=self.device)
-                key_padding_mask[num_cliques:] = 1
+                key_padding_mask = torch.zeros(self.clique_attention_context_len, dtype=torch.bool, device=self.device)
+                key_padding_mask[num_cliques:] = True
                        
             attention_output = self.clique_attention_1(Q[None], K[None], V[None], key_padding_mask=key_padding_mask)[0]
             # Apply layer normalization and residual connection

@@ -13,7 +13,7 @@ from env import AdjacencyMatrixFlippingEnv
 from model import CustomFeatureExtractor
 
 
-def train_model(model_id, n=35, lr=5e-5, policy="MlpPolicy", algorithm="PPO", torch_num_threads=8, iteration_training_steps=100000, model_path=None):
+def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO", torch_num_threads=8, iteration_training_steps=100000, model_path=None):
     # Parameters
     n = 35
     r = 4
