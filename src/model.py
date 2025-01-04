@@ -39,7 +39,7 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
             nn.Linear(embed_dim, embed_dim),
         )
         self.node_layer_norm_12 = torch.nn.LayerNorm(embed_dim)
-        self.node_downward_projection_1 = nn.Linear(self.node_attention_context_len*embed_dim, embed_dim)
+        self.node_downward_projection_1 = nn.Linear(self.node_attention_context_len*embed_dim, embed_dim-1)
         
         self.clique_Wq_1 = nn.Linear(embed_dim, embed_dim)
         self.clique_Wk_1 = nn.Linear(embed_dim, embed_dim)
@@ -53,6 +53,7 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
         )
         self.clique_layer_norm_12 = torch.nn.LayerNorm(embed_dim)
         self.clique_downward_projection_1 = nn.Linear(self.clique_attention_context_len*embed_dim, embed_dim)
+        self.clique_size_embedder = nn.Linear(1, 1)
         
         self.node_embedder_2 = nn.Linear(n, embed_dim)
         self.node_Wq_2 = nn.Linear(embed_dim, embed_dim)
@@ -66,7 +67,7 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
             nn.Linear(embed_dim, embed_dim),
         )
         self.node_layer_norm_22 = torch.nn.LayerNorm(embed_dim)
-        self.node_downward_projection_2 = nn.Linear(self.node_attention_context_len*embed_dim, embed_dim)
+        self.node_downward_projection_2 = nn.Linear(self.node_attention_context_len*embed_dim, embed_dim-1)
         
         self.clique_Wq_2 = nn.Linear(embed_dim, embed_dim)
         self.clique_Wk_2 = nn.Linear(embed_dim, embed_dim)
@@ -132,7 +133,7 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
             # Flatten and project down to the original embedding size
             attention_output = attention_output.flatten(1)
             
-            return self.node_downward_projection_1(attention_output)
+            clique_embedding = self.node_downward_projection_1(attention_output)
         else:
             Q = self.node_Wq_2(node_embeddings)
             K = self.node_Wk_2(node_embeddings)
@@ -153,7 +154,10 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
             # Flatten and project down to the original embedding size
             attention_output = attention_output.flatten(1)
             
-            return self.node_downward_projection_2(attention_output)
+            clique_embedding = self.node_downward_projection_2(attention_output)
+        clique_sizes = torch.tensor([[len(clique)] for clique in cliques], device=self.device, dtype=torch.float32)
+        clique_size_embedding = self.clique_size_embedder(clique_sizes)
+        return torch.cat([clique_embedding, clique_size_embedding], dim=1)
     
     def select_clique_node_embeddings(self, node_embeddings, cliques, Q, K, V):
         """
