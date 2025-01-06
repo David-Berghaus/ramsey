@@ -1,19 +1,17 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from stable_baselines3 import A2C, PPO, TD3, SAC, DQN
-from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.logger import configure
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.monitor import Monitor
-from multiprocessing import Pool
 import torch
 import os
 import numpy as np
+import logging
 
 from env import AdjacencyMatrixFlippingEnv
 from model import CustomFeatureExtractor
+from callbacks import TensorboardCallback  # Import the custom callback
 
-
-def make_env(model_id, seed, base_path):
+def make_env(model_id, seed, base_path, env_id):
     def _init():
         env = AdjacencyMatrixFlippingEnv(
             n=17,
@@ -24,7 +22,8 @@ def make_env(model_id, seed, base_path):
             max_steps=10,
             dir=base_path,
             model_id=model_id,
-            logger=None
+            logger=None,  # Temporarily disable logging
+            env_id=env_id,
         )
         env = Monitor(env)
         np.random.seed(seed)
@@ -32,10 +31,59 @@ def make_env(model_id, seed, base_path):
         return env
     return _init
 
+def get_model(algorithm, model_path, env, lr=5e-4, policy="MlpPolicy", policy_kwargs=None, tensorboard_log=None):
+    if algorithm == "PPO":
+        if model_path and os.path.exists(model_path):
+            print("Loading model from", model_path)
+            model = PPO.load(
+                model_path, 
+                env=env, 
+                learning_rate=lr, 
+                verbose=1, 
+                policy_kwargs=policy_kwargs, 
+                tensorboard_log=tensorboard_log
+            )
+        else:
+            model = PPO(
+                policy, 
+                env, 
+                learning_rate=lr, 
+                verbose=1, 
+                policy_kwargs=policy_kwargs, 
+                tensorboard_log=tensorboard_log
+            )
+    elif algorithm == "A2C":
+        model = A2C(
+            policy, 
+            env, 
+            learning_rate=lr, 
+            verbose=1, 
+            policy_kwargs=policy_kwargs, 
+            tensorboard_log=tensorboard_log
+        )
+    elif algorithm == "SAC":
+        model = SAC(
+            policy, 
+            env, 
+            learning_rate=lr, 
+            verbose=1, 
+            tensorboard_log=tensorboard_log
+        )
+    elif algorithm == "DQN":
+        model = DQN(
+            policy, 
+            env, 
+            learning_rate=lr, 
+            verbose=1, 
+            tensorboard_log=tensorboard_log
+        )
+    else:
+        raise ValueError(f"Unsupported algorithm: {algorithm}")
+    return model
 
 def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
-               torch_num_threads=8, iteration_training_steps=100000,
-               model_path=None, num_envs=4):
+                  torch_num_threads=1, iteration_training_steps=10000,
+                  model_path=None, num_envs=128):
     base_dir = "data/"
     time_stamp = datetime.now().strftime("%d_%m_%Y__%H_%M_%S")
     base_path = os.path.join(base_dir, "17", algorithm, time_stamp)
@@ -44,54 +92,46 @@ def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
 
     seed = model_id + int(datetime.now().timestamp())
 
-    # Create vectorized environments
-    env_fns = [make_env(model_id, seed + i, base_path) for i in range(num_envs)]
+    # Create vectorized environments with unique env_ids
+    env_fns = [make_env(model_id, seed + i, base_path, env_id=i) for i in range(num_envs)]
     env = SubprocVecEnv(env_fns)
     env = VecMonitor(env)  # Monitors rewards and other metrics
 
     policy_kwargs = dict(
         activation_fn=torch.nn.ReLU,
         net_arch=dict(pi=[128, 128], vf=[128, 128]),
-        features_extractor_class=CustomFeatureExtractor,
-        features_extractor_kwargs=dict(
-            n=17, r=4, b=4,
-            not_connected_punishment=-10000,
-            features_dim=256
-        )
+        # features_extractor_class=CustomFeatureExtractor,
+        # features_extractor_kwargs=dict(
+        #     n=17, r=4, b=4,
+        #     not_connected_punishment=-10000,
+        #     features_dim=256
+        # )
     )
 
     # Initialize the model with TensorBoard logging
-    model = get_model(algorithm, model_path, env, lr=lr, policy=policy, 
-                      policy_kwargs=policy_kwargs, tensorboard_log=log_path)
+    model = get_model(
+        algorithm, 
+        model_path, 
+        env, 
+        lr=lr, 
+        policy=policy, 
+        policy_kwargs=policy_kwargs, 
+        tensorboard_log=log_path
+    )
     torch.set_num_threads(torch_num_threads)
+
+    # Initialize the custom callback
+    callback = TensorboardCallback()
 
     iteration_count = 0
     while True:
-        model.learn(total_timesteps=iteration_training_steps, reset_num_timesteps=False)
+        model.learn(
+            total_timesteps=iteration_training_steps, 
+            reset_num_timesteps=False, 
+            callback=callback
+        )
         model.save(os.path.join(base_path, f"model_{model_id}_{iteration_count}.zip"))
         iteration_count += 1
-
-
-def get_model(algorithm, model_path, env, lr=5e-4, policy="MlpPolicy", policy_kwargs=None, tensorboard_log=None):
-    if algorithm == "PPO":
-        if model_path and os.path.exists(model_path):
-            print("Loading model from", model_path)
-            model = PPO.load(model_path, env=env, learning_rate=lr, verbose=1, 
-                            policy_kwargs=policy_kwargs, tensorboard_log=tensorboard_log)
-        else:
-            model = PPO(policy, env, learning_rate=lr, verbose=1, 
-                        policy_kwargs=policy_kwargs, tensorboard_log=tensorboard_log)
-    elif algorithm == "A2C":
-        model = A2C(policy, env, learning_rate=lr, verbose=1, 
-                    policy_kwargs=policy_kwargs, tensorboard_log=tensorboard_log)
-    elif algorithm == "SAC":
-        model = SAC(policy, env, learning_rate=lr, verbose=1, tensorboard_log=tensorboard_log)
-    elif algorithm == "DQN":
-        model = DQN(policy, env, learning_rate=lr, verbose=1, tensorboard_log=tensorboard_log)
-    else:
-        raise ValueError(f"Unsupported algorithm: {algorithm}")
-    return model
-
 
 if __name__ == "__main__":
     train_model(model_id=0)

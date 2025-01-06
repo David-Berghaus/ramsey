@@ -1,32 +1,26 @@
 import os
 import gymnasium as gym
 from gymnasium import spaces
-import random
-import matplotlib.pyplot as plt
 import numpy as np
-import numpy.typing as npt
-import scipy.optimize as opt
-import networkx as nx
-from stable_baselines3.common.logger import Logger
-import time
 import networkx as nx
 from networkx.readwrite.graph6 import write_graph6
 
 from score import get_score_and_cliques
 
 class AdjacencyMatrixFlippingEnv(gym.Env):
-    """Custom Environment for flipping entries in the adjacency matrix. The agent receives a binary vector and suggests a bit to flip."""
-    def __init__(self, n, r, b, not_connected_punishment, num_local_searches_before_reset, max_steps, dir="", model_id=0, logger=None):
+    """Custom Environment for flipping entries in the adjacency matrix."""
+
+    def __init__(self, n, r, b, not_connected_punishment, num_local_searches_before_reset, max_steps, dir="", model_id=0, logger=None, env_id=None):
         super(AdjacencyMatrixFlippingEnv, self).__init__()
         
-        self.reward_factor = None # Factor with which we normalize the rewards
-        self.max_steps = max_steps # Maximum number of steps per episode TODO: Check if this is a good value
-        self.not_connected_punishment = not_connected_punishment # Punishment for not connected graphs TODO: Check if this is a good value
-        self.num_local_searches_before_reset = num_local_searches_before_reset # Number of local searches with the same configuration before resetting the environment
+        self.reward_factor = None
+        self.max_steps = max_steps
+        self.not_connected_punishment = not_connected_punishment
+        self.num_local_searches_before_reset = num_local_searches_before_reset
         self.num_local_searches = 0
-        
+
         # Define action and observation space
-        self.num_entries = n*(n-1)//2
+        self.num_entries = n * (n - 1) // 2
         self.action_space = spaces.Discrete(self.num_entries)
         self.observation_space = spaces.MultiBinary(self.num_entries)
         self.n = n
@@ -34,15 +28,17 @@ class AdjacencyMatrixFlippingEnv(gym.Env):
         self.b = b
         self.observation_space_np = np.random.randint(2, size=self.num_entries)
         self.best_observation_space = np.copy(self.observation_space_np)    
-        self.best_recorded_score, _, _, _ = get_score_and_cliques(obs_space_to_graph(self.observation_space_np, self.n), self.r, self.b, self.not_connected_punishment)
+        self.best_recorded_score, _, _, _ = get_score_and_cliques(
+            obs_space_to_graph(self.observation_space_np, self.n), self.r, self.b, self.not_connected_punishment
+        )
         
         self.dir = dir
         self.model_id = model_id
         self.graph_storage_file = os.path.join(self.dir, f"graphs_{self.model_id}.g6")
         self.logger = logger
-        self.iteration_count = 0 # Total iteration count
-        self.step_count = 0 # Iteration count per episode
-        
+        self.env_id = env_id
+        self.iteration_count = 0
+        self.step_count = 0
 
     def step(self, action):
         # Flip the selected bit in the observation space
@@ -56,7 +52,12 @@ class AdjacencyMatrixFlippingEnv(gym.Env):
             # Apply a strong negative reward if the graph is disconnected
             reward = self.not_connected_punishment
             done = True  # End the episode
-            return self.observation_space_np, reward, done, False, {}
+            info = {
+                'score': score,
+                'reward': reward,
+                'best_score': self.best_recorded_score
+            }
+            return self.observation_space_np, reward, done, False, info
         
         # Compute reward based on the change in score
         if hasattr(self, 'previous_score'):
@@ -77,15 +78,12 @@ class AdjacencyMatrixFlippingEnv(gym.Env):
             self.best_recorded_score = score
             self.best_observation_space = np.copy(self.observation_space_np)
     
-        info = {}
+        info = {
+            'score': score,
+            'reward': reward,
+            'best_score': self.best_recorded_score
+        }
     
-        # Log the current score if a logger is available
-        if self.logger is not None:
-            self.logger.record("env/score", score)
-            self.logger.record("env/reward", reward)
-            self.logger.record("env/best_score", self.best_recorded_score)
-            self.logger.dump(self.iteration_count)
-        
         return self.observation_space_np, reward, done, False, info
         
     def reset(self, **kwargs):
@@ -95,7 +93,9 @@ class AdjacencyMatrixFlippingEnv(gym.Env):
             self.num_local_searches = 0
             # Recalculate the score for the reset state
             G = obs_space_to_graph(self.observation_space_np, self.n)
-            self.best_recorded_score, _, _, _ = get_score_and_cliques(G, self.r, self.b, self.not_connected_punishment)
+            self.best_recorded_score, _, _, _ = get_score_and_cliques(
+                G, self.r, self.b, self.not_connected_punishment
+            )
             self.previous_score = self.best_recorded_score
         else:
             self.observation_space_np = np.copy(self.best_observation_space)
@@ -105,13 +105,13 @@ class AdjacencyMatrixFlippingEnv(gym.Env):
         self.num_local_searches += 1
     
         return self.observation_space_np, {}
-    
-def flattened_off_diagonal_to_adjacency_matrix(flattened_off_diagonal: npt.ArrayLike, n: int) -> npt.ArrayLike:
+
+def flattened_off_diagonal_to_adjacency_matrix(flattened_off_diagonal: np.ndarray, n: int) -> np.ndarray:
     """Converts a flattened off-diagonal to an adjacency matrix."""
     adjacency_matrix = np.zeros((n, n))
     count = 0
     for i in range(n):
-        for j in range(i+1, n):
+        for j in range(i + 1, n):
             adjacency_matrix[i, j] = flattened_off_diagonal[count]
             adjacency_matrix[j, i] = flattened_off_diagonal[count]
             count += 1
@@ -123,5 +123,3 @@ def obs_space_to_graph(obs_space, n, return_adjacency_matrix=False):
     if return_adjacency_matrix:
         return G, adj_matrix
     return G
-
-
