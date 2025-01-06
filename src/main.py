@@ -15,11 +15,13 @@ from model import CustomFeatureExtractor
 
 def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO", torch_num_threads=8, iteration_training_steps=100000, model_path=None):
     # Parameters
-    n = 35
+    n = 17
     r = 4
-    b = 6
+    b = 4
     not_connected_punishment = -10000
     features_dim = 256
+    num_local_searches_before_reset = 1000 # Number of local searches with the same configuration before resetting the environment
+    max_steps = 10 # Maximum number of steps per episode 
     
     
     base_dir = "data/"
@@ -36,7 +38,7 @@ def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO", torch_nu
     torch.manual_seed(seed)
 
     # Create the environment and pass the seed if possible
-    E = AdjacencyMatrixFlippingEnv(n, r, b, not_connected_punishment, dir=base_path, model_id=model_id, logger=new_logger)
+    E = AdjacencyMatrixFlippingEnv(n, r, b, not_connected_punishment, num_local_searches_before_reset, max_steps, dir=base_path, model_id=model_id, logger=new_logger)
     E = Monitor(E)
 
     policy_kwargs = dict(

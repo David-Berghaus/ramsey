@@ -16,12 +16,14 @@ from score import get_score_and_cliques
 
 class AdjacencyMatrixFlippingEnv(gym.Env):
     """Custom Environment for flipping entries in the adjacency matrix. The agent receives a binary vector and suggests a bit to flip."""
-    def __init__(self, n, r, b, not_connected_punishment, dir="", model_id=0, logger=None):
+    def __init__(self, n, r, b, not_connected_punishment, num_local_searches_before_reset, max_steps, dir="", model_id=0, logger=None):
         super(AdjacencyMatrixFlippingEnv, self).__init__()
         
         self.reward_factor = None # Factor with which we normalize the rewards
-        self.max_steps = 10 # Maximum number of steps per episode TODO: Check if this is a good value
+        self.max_steps = max_steps # Maximum number of steps per episode TODO: Check if this is a good value
         self.not_connected_punishment = not_connected_punishment # Punishment for not connected graphs TODO: Check if this is a good value
+        self.num_local_searches_before_reset = num_local_searches_before_reset # Number of local searches with the same configuration before resetting the environment
+        self.num_local_searches = 0
         
         # Define action and observation space
         self.num_entries = n*(n-1)//2
@@ -87,13 +89,21 @@ class AdjacencyMatrixFlippingEnv(gym.Env):
         return self.observation_space_np, reward, done, False, info
         
     def reset(self, **kwargs):
-        self.observation_space_np = np.copy(self.best_observation_space)
+        if self.num_local_searches > self.num_local_searches_before_reset:
+            # Reset the environment to a random one
+            self.observation_space_np = np.random.randint(2, size=self.num_entries)
+            self.num_local_searches = 0
+            # Recalculate the score for the reset state
+            G = obs_space_to_graph(self.observation_space_np, self.n)
+            self.best_recorded_score, _, _, _ = get_score_and_cliques(G, self.r, self.b, self.not_connected_punishment)
+            self.previous_score = self.best_recorded_score
+        else:
+            self.observation_space_np = np.copy(self.best_observation_space)
+            self.previous_score = self.best_recorded_score
+            
         self.step_count = 0
-        
-        # Recalculate the score for the reset state
-        G = obs_space_to_graph(self.observation_space_np, self.n)
-        self.previous_score = self.best_recorded_score
-        
+        self.num_local_searches += 1
+    
         return self.observation_space_np, {}
     
 def flattened_off_diagonal_to_adjacency_matrix(flattened_off_diagonal: npt.ArrayLike, n: int) -> npt.ArrayLike:

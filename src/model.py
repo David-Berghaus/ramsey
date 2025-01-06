@@ -230,7 +230,7 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
                 key_padding_mask = torch.zeros(self.clique_attention_context_len, dtype=torch.bool, device=self.device)
                 key_padding_mask[num_cliques:] = True
                        
-            attention_output = self.clique_attention_1(Q[None], K[None], V[None], key_padding_mask=key_padding_mask)[0]
+            attention_output = self.clique_attention_1(Q[None], K[None], V[None], key_padding_mask=key_padding_mask[None])[0]
             # Apply layer normalization and residual connection
             attention_output = self.clique_layer_norm_11(attention_output) + original_embeddings[None]
             
@@ -258,7 +258,7 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
                 key_padding_mask = torch.zeros(self.clique_attention_context_len, device=self.device)
                 key_padding_mask[num_cliques:] = 1
                        
-            attention_output = self.clique_attention_2(Q[None], K[None], V[None], key_padding_mask=key_padding_mask)[0]
+            attention_output = self.clique_attention_2(Q[None], K[None], V[None], key_padding_mask=key_padding_mask[None])[0]
             # Apply layer normalization and residual connection
             attention_output = self.clique_layer_norm_21(attention_output) + original_embeddings[None]
             
