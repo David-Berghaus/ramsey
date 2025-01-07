@@ -82,8 +82,8 @@ def get_model(algorithm, model_path, env, lr=5e-4, policy="MlpPolicy", policy_kw
     return model
 
 def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
-                  torch_num_threads=1, iteration_training_steps=10000,
-                  model_path=None, num_envs=128):
+                  torch_num_threads=1, iteration_training_steps=1,
+                  model_path=None, num_envs=1):
     base_dir = "data/"
     time_stamp = datetime.now().strftime("%d_%m_%Y__%H_%M_%S")
     base_path = os.path.join(base_dir, "17", algorithm, time_stamp)
@@ -99,13 +99,16 @@ def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
 
     policy_kwargs = dict(
         activation_fn=torch.nn.ReLU,
-        net_arch=dict(pi=[128, 128], vf=[128, 128]),
-        # features_extractor_class=CustomFeatureExtractor,
-        # features_extractor_kwargs=dict(
-        #     n=17, r=4, b=4,
-        #     not_connected_punishment=-10000,
-        #     features_dim=256
-        # )
+        net_arch=dict(pi=[8, 8], vf=[8, 8]),
+        features_extractor_class=CustomFeatureExtractor,
+        features_extractor_kwargs=dict(
+            n=17, r=4, b=4,
+            not_connected_punishment=-10000,
+            features_dim=16,
+            num_heads=1,
+            node_attention_context_len=10, 
+            clique_attention_context_len=128,
+        )
     )
 
     # Initialize the model with TensorBoard logging
@@ -119,6 +122,13 @@ def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
         tensorboard_log=log_path
     )
     torch.set_num_threads(torch_num_threads)
+    
+    # get model feature extractor
+    feature_extr: CustomFeatureExtractor = model.policy.features_extractor
+
+    # convert all parameters to trainable
+    for name, param in feature_extr.named_parameters():
+        param.requires_grad = True
 
     # Initialize the custom callback
     callback = TensorboardCallback()
@@ -128,10 +138,11 @@ def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
         model.learn(
             total_timesteps=iteration_training_steps, 
             reset_num_timesteps=False, 
-            callback=callback
+            callback=callback,
         )
         model.save(os.path.join(base_path, f"model_{model_id}_{iteration_count}.zip"))
         iteration_count += 1
+
 
 if __name__ == "__main__":
     train_model(model_id=0)

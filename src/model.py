@@ -14,7 +14,7 @@ def get_one_hot_encoding(n, i):
     return encoding
 
 class CustomFeatureExtractor(BaseFeaturesExtractor):
-    def __init__(self, observation_space, n, r, b, not_connected_punishment, features_dim):
+    def __init__(self, observation_space, n, r, b, not_connected_punishment, features_dim, num_heads, node_attention_context_len, clique_attention_context_len):
         super(CustomFeatureExtractor, self).__init__(observation_space, features_dim)
         self.n = n
         self.r = r
@@ -23,10 +23,10 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
         # Some hyperparameters
-        embed_dim = 128
+        embed_dim = features_dim//2
         num_heads = 2
-        self.node_attention_context_len = 10
-        self.clique_attention_context_len = 128
+        self.node_attention_context_len = node_attention_context_len
+        self.clique_attention_context_len = clique_attention_context_len
         
         self.node_embedder_1 = nn.Linear(n, embed_dim)
         self.node_Wq_1 = nn.Linear(embed_dim, embed_dim)
