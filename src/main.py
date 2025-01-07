@@ -83,7 +83,7 @@ def get_model(algorithm, model_path, env, lr=5e-4, policy="MlpPolicy", policy_kw
 
 def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
                   torch_num_threads=1, iteration_training_steps=1,
-                  model_path=None, num_envs=1):
+                  model_path=None, num_envs=512):
     base_dir = "data/"
     time_stamp = datetime.now().strftime("%d_%m_%Y__%H_%M_%S")
     base_path = os.path.join(base_dir, "17", algorithm, time_stamp)
@@ -99,15 +99,15 @@ def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
 
     policy_kwargs = dict(
         activation_fn=torch.nn.ReLU,
-        net_arch=dict(pi=[8, 8], vf=[8, 8]),
+        net_arch=dict(pi=[32, 32], vf=[32, 32]),
         features_extractor_class=CustomFeatureExtractor,
         features_extractor_kwargs=dict(
             n=17, r=4, b=4,
             not_connected_punishment=-10000,
-            features_dim=16,
+            features_dim=64,
             num_heads=1,
-            node_attention_context_len=10, 
-            clique_attention_context_len=128,
+            node_attention_context_len=8, 
+            clique_attention_context_len=32,
         )
     )
 
