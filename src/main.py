@@ -100,7 +100,7 @@ def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
     policy_kwargs = dict(
         activation_fn=torch.nn.ReLU,
         net_arch=dict(pi=[32, 32], vf=[32, 32]),
-        features_extractor_class=NodeMeanPoolCliqueAttentionFeatureExtractor,
+        features_extractor_class=AttentionFeatureExtractor,
         features_extractor_kwargs=dict(
             n=17, r=4, b=4,
             not_connected_punishment=-10000,
@@ -124,7 +124,7 @@ def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
     torch.set_num_threads(torch_num_threads)
     
     # get model feature extractor
-    feature_extr: NodeMeanPoolCliqueAttentionFeatureExtractor = model.policy.features_extractor
+    feature_extr: AttentionFeatureExtractor = model.policy.features_extractor
 
     # convert all parameters to trainable
     for name, param in feature_extr.named_parameters():

@@ -3,9 +3,7 @@ import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import numpy as np
 
-from score import get_score_and_cliques
-from env import obs_space_to_graph
-
+from cliques_cache import CliquesCache
 
 def get_one_hot_encoding(n, i):
     """Returns the one-hot encoding of the integer i."""
@@ -20,6 +18,7 @@ class AttentionFeatureExtractor(BaseFeaturesExtractor):
         self.r = r
         self.b = b
         self.not_connected_punishment = not_connected_punishment
+        self.cliques_cache = CliquesCache(10000)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
         # Some hyperparameters
@@ -92,8 +91,7 @@ class AttentionFeatureExtractor(BaseFeaturesExtractor):
         graph_embeddings = []
         cliques_r_batch, cliques_b_batch = [], []
         for observation in observations:
-            G = obs_space_to_graph(observation, self.n)
-            _, cliques_r, cliques_b, _ = get_score_and_cliques(G, self.r, self.b, self.not_connected_punishment)
+            cliques_r, cliques_b = self.cliques_cache.get(observation, self.r, self.b, self.n)
             cliques_r_batch.append(cliques_r)
             cliques_b_batch.append(cliques_b)
             
@@ -304,6 +302,7 @@ class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
         self.r = r
         self.b = b
         self.not_connected_punishment = not_connected_punishment
+        self.cliques_cache = CliquesCache(10000)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
         # Some hyperparameters
@@ -352,8 +351,7 @@ class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
         graph_embeddings = []
         cliques_r_batch, cliques_b_batch = [], []
         for observation in observations:
-            G = obs_space_to_graph(observation, self.n)
-            _, cliques_r, cliques_b, _ = get_score_and_cliques(G, self.r, self.b, self.not_connected_punishment)
+            cliques_r, cliques_b = self.cliques_cache.get(observation, self.r, self.b, self.n)
             cliques_r_batch.append(cliques_r)
             cliques_b_batch.append(cliques_b)
             
