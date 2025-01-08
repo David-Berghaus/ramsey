@@ -8,7 +8,7 @@ import numpy as np
 import logging
 
 from env import AdjacencyMatrixFlippingEnv
-from model import CustomFeatureExtractor
+from model import AttentionFeatureExtractor, NodeMeanPoolCliqueAttentionFeatureExtractor
 from callbacks import TensorboardCallback  # Import the custom callback
 
 def make_env(model_id, seed, base_path, env_id):
@@ -19,7 +19,7 @@ def make_env(model_id, seed, base_path, env_id):
             b=4,
             not_connected_punishment=-10000,
             num_local_searches_before_reset=1000,
-            max_steps=10,
+            max_steps=1,
             dir=base_path,
             model_id=model_id,
             logger=None,  # Temporarily disable logging
@@ -83,7 +83,7 @@ def get_model(algorithm, model_path, env, lr=5e-4, policy="MlpPolicy", policy_kw
 
 def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
                   torch_num_threads=1, iteration_training_steps=1,
-                  model_path=None, num_envs=16):
+                  model_path=None, num_envs=2):
     base_dir = "data/"
     time_stamp = datetime.now().strftime("%d_%m_%Y__%H_%M_%S")
     base_path = os.path.join(base_dir, "17", algorithm, time_stamp)
@@ -100,14 +100,14 @@ def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
     policy_kwargs = dict(
         activation_fn=torch.nn.ReLU,
         net_arch=dict(pi=[32, 32], vf=[32, 32]),
-        features_extractor_class=CustomFeatureExtractor,
+        features_extractor_class=NodeMeanPoolCliqueAttentionFeatureExtractor,
         features_extractor_kwargs=dict(
             n=17, r=4, b=4,
             not_connected_punishment=-10000,
             features_dim=64,
             num_heads=1,
             node_attention_context_len=8, 
-            clique_attention_context_len=32,
+            clique_attention_context_len=64,
         )
     )
 
@@ -124,7 +124,7 @@ def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
     torch.set_num_threads(torch_num_threads)
     
     # get model feature extractor
-    feature_extr: CustomFeatureExtractor = model.policy.features_extractor
+    feature_extr: NodeMeanPoolCliqueAttentionFeatureExtractor = model.policy.features_extractor
 
     # convert all parameters to trainable
     for name, param in feature_extr.named_parameters():

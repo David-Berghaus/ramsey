@@ -48,16 +48,16 @@ class AdjacencyMatrixFlippingEnv(gym.Env):
         # Compute the new score after the agent's action
         score, cliques_r, cliques_b, is_connected = get_score_and_cliques(G, self.r, self.b, self.not_connected_punishment)
         
-        if not is_connected:
-            # Apply a strong negative reward if the graph is disconnected
-            reward = self.not_connected_punishment
-            done = True  # End the episode
-            info = {
-                'score': score,
-                'reward': reward,
-                'best_score': self.best_recorded_score
-            }
-            return self.observation_space_np, reward, done, False, info
+        # if not is_connected:
+        #     # Apply a strong negative reward if the graph is disconnected
+        #     reward = self.not_connected_punishment
+        #     done = True  # End the episode
+        #     info = {
+        #         'score': score,
+        #         'reward': reward,
+        #         'best_score': self.best_recorded_score
+        #     }
+        #     return self.observation_space_np, reward, done, False, info
         
         # Compute reward based on the change in score
         if hasattr(self, 'previous_score'):

@@ -13,9 +13,9 @@ def get_one_hot_encoding(n, i):
     encoding[i] = 1
     return encoding
 
-class CustomFeatureExtractor(BaseFeaturesExtractor):
+class AttentionFeatureExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space, n, r, b, not_connected_punishment, features_dim, num_heads, node_attention_context_len, clique_attention_context_len):
-        super(CustomFeatureExtractor, self).__init__(observation_space, features_dim)
+        super(AttentionFeatureExtractor, self).__init__(observation_space, features_dim)
         self.n = n
         self.r = r
         self.b = b
@@ -236,6 +236,170 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
         key_padding_masks_batch = torch.cat(key_padding_masks_batch)
         return queries_batch, keys_batch, values_batch, original_embeddings_batch, key_padding_masks_batch
     
+    def graph_attention_encoder(self, use_r, clique_embeddings, clique_masks):
+        """
+        Perform attention over the cliques in the graph.
+        """
+        num_cliques = clique_embeddings.shape[0]
+        if num_cliques > self.clique_attention_context_len:
+            clique_embeddings = clique_embeddings[:,:self.clique_attention_context_len,:]
+        original_embeddings = clique_embeddings
+        if use_r:
+            # Flatten the first two dimenions to get the shape [batch_size * clique_attention_context_len, embed_dim] before applying the projections
+            clique_embeddings_reshaped = clique_embeddings.view(-1, clique_embeddings.shape[-1])
+            Q = self.clique_Wq_1(clique_embeddings_reshaped)
+            K = self.clique_Wk_1(clique_embeddings_reshaped)
+            V = self.clique_Wv_1(clique_embeddings_reshaped)
+            # Transform the queries, keys and values back to the original shape
+            Q = Q.view(clique_embeddings.shape)
+            K = K.view(clique_embeddings.shape)
+            V = V.view(clique_embeddings.shape)
+                      
+            attention_output = self.clique_attention_1(Q, K, V, key_padding_mask=clique_masks)[0]
+            # Apply layer normalization and residual connection
+            attention_output = self.clique_layer_norm_11(attention_output) + original_embeddings
+            
+            # Apply a feed forward network
+            attention_output_before_ff = attention_output
+            attention_output = self.clique_nn_1(attention_output)
+            # Apply layer normalization and residual connection
+            attention_output = self.clique_layer_norm_12(attention_output) + attention_output_before_ff
+            
+            # Flatten and project down to the original embedding size
+            attention_output = attention_output.flatten(1)
+            
+            return self.clique_downward_projection_1(attention_output)
+        else:
+            # Flatten the first two dimenions to get the shape [batch_size * clique_attention_context_len, embed_dim] before applying the projections
+            clique_embeddings_reshaped = clique_embeddings.view(-1, clique_embeddings.shape[-1])
+            Q = self.clique_Wq_2(clique_embeddings_reshaped)
+            K = self.clique_Wk_2(clique_embeddings_reshaped)
+            V = self.clique_Wv_2(clique_embeddings_reshaped)
+            # Transform the queries, keys and values back to the original shape
+            Q = Q.view(clique_embeddings.shape)
+            K = K.view(clique_embeddings.shape)
+            V = V.view(clique_embeddings.shape)
+                       
+            attention_output = self.clique_attention_2(Q, K, V, key_padding_mask=clique_masks)[0]
+            # Apply layer normalization and residual connection
+            attention_output = self.clique_layer_norm_21(attention_output) + original_embeddings
+            
+            # Apply a feed forward network
+            attention_output_before_ff = attention_output
+            attention_output = self.clique_nn_2(attention_output)
+            # Apply layer normalization and residual connection
+            attention_output = self.clique_layer_norm_22(attention_output) + attention_output_before_ff
+            
+            # Flatten and project down to the original embedding size
+            attention_output = attention_output.flatten(1)
+            
+            return self.clique_downward_projection_2(attention_output)
+        
+        
+        
+class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
+    def __init__(self, observation_space, n, r, b, not_connected_punishment, features_dim, num_heads, node_attention_context_len, clique_attention_context_len):
+        super(NodeMeanPoolCliqueAttentionFeatureExtractor, self).__init__(observation_space, features_dim)
+        self.n = n
+        self.r = r
+        self.b = b
+        self.not_connected_punishment = not_connected_punishment
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+        # Some hyperparameters
+        embed_dim = features_dim//2
+        num_heads = 2
+        self.node_attention_context_len = node_attention_context_len
+        self.clique_attention_context_len = clique_attention_context_len
+        
+        self.node_embedder_1 = nn.Linear(n, embed_dim-1)
+        self.clique_size_embedder_1 = nn.Linear(1, 1)
+        
+        self.clique_Wq_1 = nn.Linear(embed_dim, embed_dim)
+        self.clique_Wk_1 = nn.Linear(embed_dim, embed_dim)
+        self.clique_Wv_1 = nn.Linear(embed_dim, embed_dim)
+        self.clique_attention_1 = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+        self.clique_layer_norm_11 = torch.nn.LayerNorm(embed_dim)
+        self.clique_nn_1 = nn.Sequential( # NN after attention
+            nn.Linear(embed_dim, embed_dim),
+            nn.ReLU(),
+            nn.Linear(embed_dim, embed_dim),
+        )
+        self.clique_layer_norm_12 = torch.nn.LayerNorm(embed_dim)
+        self.clique_downward_projection_1 = nn.Linear(self.clique_attention_context_len*embed_dim, embed_dim)
+        
+        self.node_embedder_2 = nn.Linear(n, embed_dim-1)
+        self.clique_size_embedder_2 = nn.Linear(1, 1)
+        
+        self.clique_Wq_2 = nn.Linear(embed_dim, embed_dim)
+        self.clique_Wk_2 = nn.Linear(embed_dim, embed_dim)
+        self.clique_Wv_2 = nn.Linear(embed_dim, embed_dim)
+        self.clique_attention_2 = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+        self.clique_layer_norm_21 = torch.nn.LayerNorm(embed_dim)
+        self.clique_nn_2 = nn.Sequential( # NN after attention
+            nn.Linear(embed_dim, embed_dim),
+            nn.ReLU(),
+            nn.Linear(embed_dim, embed_dim),
+        )
+        self.clique_layer_norm_22 = torch.nn.LayerNorm(embed_dim)
+        self.clique_downward_projection_2 = nn.Linear(self.clique_attention_context_len*embed_dim, embed_dim)
+        
+        
+    def forward(self, observations):
+        node_embeddings_1 = self.node_embeddings(True) #[n, embed_dim]
+        node_embeddings_2 = self.node_embeddings(False) #[n, embed_dim]
+        
+        graph_embeddings = []
+        cliques_r_batch, cliques_b_batch = [], []
+        for observation in observations:
+            G = obs_space_to_graph(observation, self.n)
+            _, cliques_r, cliques_b, _ = get_score_and_cliques(G, self.r, self.b, self.not_connected_punishment)
+            cliques_r_batch.append(cliques_r)
+            cliques_b_batch.append(cliques_b)
+            
+        clique_embeddings_1, clique_masks_batch_1 = self.clique_attention_encoder(True, node_embeddings_1, cliques_r_batch) # [batch_size, clique_attention_context_len, embed_dim], [batch_size, clique_attention_context_len]
+        graph_embedding_1 = self.graph_attention_encoder(True, clique_embeddings_1, clique_masks_batch_1) # [batch_size, embed_dim]
+        
+        clique_embeddings_2, clique_masks_batch_2 = self.clique_attention_encoder(False, node_embeddings_2, cliques_b_batch) # [batch_size, clique_attention_context_len, embed_dim], [batch_size, clique_attention_context_len]
+        graph_embedding_2 = self.graph_attention_encoder(False, clique_embeddings_2, clique_masks_batch_2) # [batch_size, embed_dim]
+
+        graph_embeddings = torch.cat([graph_embedding_1, graph_embedding_2], dim=1)
+        return graph_embeddings
+    
+    
+    def node_embeddings(self, use_r):
+        nodes_one_hot = torch.zeros(self.n, self.n, device=self.device, dtype=torch.float32)
+        for i in range(self.n):
+            nodes_one_hot[i, i] = 1
+        if use_r:
+            return self.node_embedder_1(nodes_one_hot)
+        else:
+            return self.node_embedder_2(nodes_one_hot)
+       
+        
+    def clique_attention_encoder(self, use_r, node_embeddings, cliques_batch):
+        """
+        Perform attention over the nodes in the cliques.
+        """
+        clique_mask_batch = torch.zeros(len(cliques_batch), self.clique_attention_context_len, dtype=torch.bool, device=self.device)
+        max_clique_size = max(len(clique) for cliques in cliques_batch for clique in cliques)
+        if use_r:   
+            clique_size_embeddings = self.clique_size_embedder_1(torch.tensor([[i] for i in range(max_clique_size+1)], device=self.device, dtype=torch.float32))
+        else:
+            clique_size_embeddings = self.clique_size_embedder_2(torch.tensor([[i] for i in range(max_clique_size+1)], device=self.device, dtype=torch.float32))
+        embed_dim = node_embeddings.shape[-1]+1
+        res = torch.zeros(len(cliques_batch), self.clique_attention_context_len, embed_dim, device=self.device, dtype=torch.float32) # [batch_size, clique_attention_context_len, embed_dim-1]
+        for i in range(len(cliques_batch)):
+            for j in range(min(self.clique_attention_context_len,len(cliques_batch[i]))):
+                clique = cliques_batch[i][j]
+                clique_size = len(clique)
+                res[i, j, :embed_dim-1] = torch.mean(node_embeddings[clique], dim=0)
+                res[i, j, embed_dim-1] = clique_size_embeddings[clique_size]
+                if clique_size < self.clique_attention_context_len:
+                    clique_mask_batch[i, clique_size:] = True
+        
+        return res, clique_mask_batch
+
     
     def graph_attention_encoder(self, use_r, clique_embeddings, clique_masks):
         """
