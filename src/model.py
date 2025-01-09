@@ -293,8 +293,7 @@ class AttentionFeatureExtractor(BaseFeaturesExtractor):
             
             return self.clique_downward_projection_2(attention_output)
         
-        
-        
+
 class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space, n, r, b, not_connected_punishment, features_dim, num_heads, node_attention_context_len, clique_attention_context_len):
         super(NodeMeanPoolCliqueAttentionFeatureExtractor, self).__init__(observation_space, features_dim)
@@ -354,12 +353,12 @@ class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
             cliques_r, cliques_b = self.cliques_cache.get(observation, self.r, self.b, self.n)
             cliques_r_batch.append(cliques_r)
             cliques_b_batch.append(cliques_b)
-            
-        clique_embeddings_1, clique_masks_batch_1 = self.clique_attention_encoder(True, node_embeddings_1, cliques_r_batch) # [batch_size, clique_attention_context_len, embed_dim], [batch_size, clique_attention_context_len]
-        graph_embedding_1 = self.graph_attention_encoder(True, clique_embeddings_1, clique_masks_batch_1) # [batch_size, embed_dim]
         
-        clique_embeddings_2, clique_masks_batch_2 = self.clique_attention_encoder(False, node_embeddings_2, cliques_b_batch) # [batch_size, clique_attention_context_len, embed_dim], [batch_size, clique_attention_context_len]
+        clique_embeddings_1, clique_masks_batch_1 = self.clique_mean_encoder(True, node_embeddings_1, cliques_r_batch) # [batch_size, clique_attention_context_len, embed_dim], [batch_size, clique_attention_context_len]    
+        clique_embeddings_2, clique_masks_batch_2 = self.clique_mean_encoder(False, node_embeddings_2, cliques_b_batch) # [batch_size, clique_attention_context_len, embed_dim], [batch_size, clique_attention_context_len]
+        
         graph_embedding_2 = self.graph_attention_encoder(False, clique_embeddings_2, clique_masks_batch_2) # [batch_size, embed_dim]
+        graph_embedding_1 = self.graph_attention_encoder(True, clique_embeddings_1, clique_masks_batch_1) # [batch_size, embed_dim]
 
         graph_embeddings = torch.cat([graph_embedding_1, graph_embedding_2], dim=1)
         return graph_embeddings
@@ -375,9 +374,17 @@ class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
             return self.node_embedder_2(nodes_one_hot)
        
         
-    def clique_attention_encoder(self, use_r, node_embeddings, cliques_batch):
+    def clique_mean_encoder_slow(self, use_r, node_embeddings, cliques_batch):
         """
-        Perform attention over the nodes in the cliques.
+        Compute the mean over the nodes in the cliques.
+        
+        Input:
+        node_embeddings: [n, embed_dim-1]
+        cliques_batch: List of graphs, where each graph is a list of cliques, where each clique is a list of nodes.
+        
+        Output:
+        clique_embeddings_batch: [batch_size, clique_attention_context_len, embed_dim]
+        clique_masks_batch: [batch_size, clique_attention_context_len]
         """
         clique_mask_batch = torch.zeros(len(cliques_batch), self.clique_attention_context_len, dtype=torch.bool, device=self.device)
         max_clique_size = max(len(clique) for cliques in cliques_batch for clique in cliques)
@@ -388,15 +395,113 @@ class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
         embed_dim = node_embeddings.shape[-1]+1
         res = torch.zeros(len(cliques_batch), self.clique_attention_context_len, embed_dim, device=self.device, dtype=torch.float32) # [batch_size, clique_attention_context_len, embed_dim-1]
         for i in range(len(cliques_batch)):
-            for j in range(min(self.clique_attention_context_len,len(cliques_batch[i]))):
+            num_cliques = len(cliques_batch[i])
+            for j in range(min(self.clique_attention_context_len,num_cliques)):
                 clique = cliques_batch[i][j]
                 clique_size = len(clique)
                 res[i, j, :embed_dim-1] = torch.mean(node_embeddings[clique], dim=0)
                 res[i, j, embed_dim-1] = clique_size_embeddings[clique_size]
-                if clique_size < self.clique_attention_context_len:
-                    clique_mask_batch[i, clique_size:] = True
+            if num_cliques < self.clique_attention_context_len:
+                clique_mask_batch[i, num_cliques:] = True
         
         return res, clique_mask_batch
+    
+    def clique_mean_encoder(self, use_r, node_embeddings, cliques_batch):
+        """
+        Compute the mean over the nodes in the cliques.
+        
+        Input:
+        node_embeddings: [n, embed_dim-1]
+        cliques_batch: List of graphs, where each graph is a list of cliques, 
+                    where each clique is a list of nodes.
+        
+        Output:
+        clique_embeddings_batch: [batch_size, clique_attention_context_len, embed_dim]
+        clique_masks_batch: [batch_size, clique_attention_context_len]
+        """
+        batch_size = len(cliques_batch)
+        context_len = self.clique_attention_context_len
+
+        # Step 1: Extend node_embeddings with a padding node
+        padding_embedding = torch.zeros(1, node_embeddings.size(1), device=node_embeddings.device)
+        node_embeddings = torch.cat([node_embeddings, padding_embedding], dim=0)  # New padding node at index `padding_idx`
+        padding_idx = node_embeddings.size(0) - 1  # Index of the padding node
+
+        # Step 2: Ensure each graph has exactly context_len cliques by padding with empty cliques
+        padded_cliques_batch = [
+            graph[:context_len] + [[] for _ in range(context_len - len(graph))]
+            if len(graph) < context_len else graph[:context_len]
+            for graph in cliques_batch
+        ]
+
+        # Step 3: Flatten all cliques and prepare masks
+        all_cliques = []
+        clique_masks = []
+        for graph in padded_cliques_batch:
+            for clique in graph:
+                if clique:
+                    all_cliques.append(clique)
+                    clique_masks.append(False)
+                else:
+                    all_cliques.append([padding_idx])  # Pad with padding_idx
+                    clique_masks.append(True)
+        
+        total_cliques = batch_size * context_len
+
+        # Step 4: Compute clique sizes
+        clique_sizes = torch.tensor(
+            [len(clique) if not mask else 0 for clique, mask in zip(all_cliques, clique_masks)], 
+            device=self.device
+        )
+
+        max_clique_size = clique_sizes.max().item() if clique_sizes.numel() > 0 else 0
+
+        # Step 5: Get clique size embeddings
+        size_indices = torch.arange(0, max_clique_size + 1, device=self.device).unsqueeze(1).float()
+        if use_r:
+            clique_size_embeddings = self.clique_size_embedder_1(size_indices)  # [max_size+1, embed_dim_size]
+        else:
+            clique_size_embeddings = self.clique_size_embedder_2(size_indices)
+
+        # Step 6: Handle case with no cliques
+        if total_cliques == 0:
+            embed_dim = node_embeddings.shape[-1] + 1
+            clique_embeddings_batch = torch.zeros(batch_size, context_len, embed_dim, device=self.device)
+            clique_masks_batch = torch.ones(batch_size, context_len, dtype=torch.bool, device=self.device)
+            return clique_embeddings_batch, clique_masks_batch
+
+        # Step 7: Determine the maximum clique size for padding
+        max_clique_size = max(len(clique) for clique in all_cliques) if all_cliques else 0
+
+        # Step 8: Pad cliques with padding_idx to have uniform size
+        padded_cliques = [
+            clique + [padding_idx] * (max_clique_size - len(clique)) if len(clique) < max_clique_size else clique
+            for clique in all_cliques
+        ]
+
+        cliques_tensor = torch.tensor(padded_cliques, device=self.device, dtype=torch.long)  # [total_cliques, max_clique_size]
+
+        # Step 9: Create mask for valid nodes (padding_idx indicates padding)
+        mask = cliques_tensor != padding_idx  # [total_cliques, max_clique_size]
+
+        # Step 10: Compute sum of node embeddings where mask is True
+        node_sum = node_embeddings[cliques_tensor] * mask.unsqueeze(-1)  # [total_cliques, max_clique_size, embed_dim-1]
+        node_mean = node_sum.sum(dim=1) / mask.sum(dim=1, keepdim=True).clamp(min=1)  # [total_cliques, embed_dim-1]
+
+        # Step 11: Assign size embeddings
+        size_embeds = clique_size_embeddings[clique_sizes]  # [total_cliques, embed_dim_size]
+
+        # Step 12: Combine embeddings
+        embed_dim = node_embeddings.shape[-1] + 1
+        res = torch.cat([node_mean, size_embeds], dim=-1)  # [total_cliques, embed_dim]
+
+        # Step 13: Reshape to [batch_size, context_len, embed_dim]
+        clique_embeddings_batch = res.view(batch_size, context_len, embed_dim)
+
+        # Step 14: Create masks: True where cliques are padded (originally missing)
+        clique_masks_batch = torch.tensor(clique_masks, device=self.device).view(batch_size, context_len)
+
+        return clique_embeddings_batch, clique_masks_batch
 
     
     def graph_attention_encoder(self, use_r, clique_embeddings, clique_masks):
