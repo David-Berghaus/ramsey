@@ -17,9 +17,8 @@ def make_env(model_id, seed, base_path, env_id):
             n=17,
             r=4,
             b=4,
-            not_connected_punishment=-10000,
+            not_connected_punishment=-100,
             num_local_searches_before_reset=1000,
-            max_steps=1,
             dir=base_path,
             model_id=model_id,
             logger=None,  # Temporarily disable logging
@@ -31,7 +30,7 @@ def make_env(model_id, seed, base_path, env_id):
         return env
     return _init
 
-def get_model(algorithm, model_path, env, lr=5e-4, policy="MlpPolicy", policy_kwargs=None, tensorboard_log=None):
+def get_model(algorithm, model_path, env, lr=1e-5, policy="MlpPolicy", policy_kwargs=None, tensorboard_log=None):
     if algorithm == "PPO":
         if model_path and os.path.exists(model_path):
             print("Loading model from", model_path)
@@ -41,7 +40,7 @@ def get_model(algorithm, model_path, env, lr=5e-4, policy="MlpPolicy", policy_kw
                 learning_rate=lr, 
                 verbose=1, 
                 policy_kwargs=policy_kwargs, 
-                tensorboard_log=tensorboard_log
+                tensorboard_log=tensorboard_log,
             )
         else:
             model = PPO(
@@ -50,7 +49,7 @@ def get_model(algorithm, model_path, env, lr=5e-4, policy="MlpPolicy", policy_kw
                 learning_rate=lr, 
                 verbose=1, 
                 policy_kwargs=policy_kwargs, 
-                tensorboard_log=tensorboard_log
+                tensorboard_log=tensorboard_log,
             )
     elif algorithm == "A2C":
         model = A2C(
@@ -83,7 +82,7 @@ def get_model(algorithm, model_path, env, lr=5e-4, policy="MlpPolicy", policy_kw
 
 def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
                   torch_num_threads=1, iteration_training_steps=1,
-                  model_path=None, num_envs=1):
+                  model_path=None, num_envs=64):
     base_dir = "data/"
     time_stamp = datetime.now().strftime("%d_%m_%Y__%H_%M_%S")
     base_path = os.path.join(base_dir, "17", algorithm, time_stamp)

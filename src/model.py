@@ -536,7 +536,7 @@ class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
             # Flatten and project down to the original embedding size
             attention_output = attention_output.flatten(1)
             
-            return self.clique_downward_projection_1(attention_output)
+            graph_embedding = self.clique_downward_projection_1(attention_output)
         else:
             # Flatten the first two dimenions to get the shape [batch_size * clique_attention_context_len, embed_dim] before applying the projections
             clique_embeddings_reshaped = clique_embeddings.view(-1, clique_embeddings.shape[-1])
@@ -561,4 +561,8 @@ class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
             # Flatten and project down to the original embedding size
             attention_output = attention_output.flatten(1)
             
-            return self.clique_downward_projection_2(attention_output)
+            graph_embedding = self.clique_downward_projection_1(attention_output)
+        # It can happen for disconnected graphs that we have no cliques (which we will punish later)
+        # Replace all NaN values with zeros
+        graph_embedding[torch.isnan(graph_embedding)] = 0
+        return graph_embedding
