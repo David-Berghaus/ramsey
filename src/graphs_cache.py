@@ -1,5 +1,6 @@
 import numpy as np
 import hashlib
+from networkx.linalg.graphmatrix import adjacency_matrix
 
 from score import get_score_and_cliques
 from env import obs_space_to_graph
@@ -15,7 +16,7 @@ def hash_tensor(tensor):
     hash_object.update(tensor_bytes)
     return hash_object.hexdigest()
 
-class CliquesCache:
+class GraphsCache:
     def __init__(self, max_size):
         self.cache = {}
         self.order = []
@@ -27,8 +28,9 @@ class CliquesCache:
             return self.cache[key]
         G = obs_space_to_graph(observation_space, n)
         _, cliques_r, cliques_b, _ = get_score_and_cliques(G, r, b, -1000)
-        self.put(key, (cliques_r, cliques_b))
-        return cliques_r, cliques_b
+        adj_matrix = adjacency_matrix(G).toarray()
+        self.put(key, (cliques_r, cliques_b, adj_matrix))
+        return cliques_r, cliques_b, adj_matrix
 
     def put(self, key, value):
         if key not in self.cache:
