@@ -82,7 +82,7 @@ def get_model(algorithm, model_path, env, lr=1e-5, policy="MlpPolicy", policy_kw
 
 def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
                   torch_num_threads=1, iteration_training_steps=1,
-                  model_path=None, num_envs=1):
+                  model_path=None, num_envs=64):
     base_dir = "data/"
     time_stamp = datetime.now().strftime("%d_%m_%Y__%H_%M_%S")
     base_path = os.path.join(base_dir, "17", algorithm, time_stamp)

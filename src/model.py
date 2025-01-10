@@ -110,6 +110,10 @@ class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
         graph_embedding_2 = self.graph_embeddings(False, cliques_embeddings_2, graph_edge_conv_embedding_2) # [batch_size, embed_dim]
         
         graph_embeddings = torch.cat([graph_embedding_1, graph_embedding_2], dim=1) # [batch_size, 2*embed_dim]
+        
+        # check if there are any NaN values in the graph embeddings
+        if torch.isnan(graph_embeddings).any():
+            breakpoint()
         return graph_embeddings
     
     
@@ -144,7 +148,7 @@ class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
         else:
             adj_tilde_batch = 1 - adj_matrix_batch
         degree_matrix_batch = torch.sum(adj_tilde_batch, dim=1)
-        degree_matrix_batch = torch.diag_embed(degree_matrix_batch)
+        degree_matrix_batch = torch.diag_embed(degree_matrix_batch + 1e-8)
         degree_matrix_batch = torch.inverse(degree_matrix_batch)
         normalized_adj_matrix_batch = torch.matmul(degree_matrix_batch, adj_tilde_batch)
         graph_embeddings = torch.matmul(normalized_adj_matrix_batch, node_embeddings)
@@ -343,7 +347,7 @@ class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
             # Flatten and project down to the original embedding size
             attention_output = attention_output.flatten(1)
             
-            graph_embedding = self.clique_downward_projection_1(attention_output)
+            graph_embedding = self.clique_downward_projection_2(attention_output)
         # It can happen for disconnected graphs that we have no cliques (which we will punish later)
         # Replace all NaN values with zeros
         graph_embedding[torch.isnan(graph_embedding)] = 0
