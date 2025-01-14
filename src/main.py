@@ -41,6 +41,8 @@ def get_model(algorithm, model_path, env, lr=1e-5, policy="MlpPolicy", policy_kw
                 verbose=1, 
                 policy_kwargs=policy_kwargs, 
                 tensorboard_log=tensorboard_log,
+                # max_grad_norm=0.1,
+                n_steps=1,
             )
         else:
             model = PPO(
@@ -50,6 +52,8 @@ def get_model(algorithm, model_path, env, lr=1e-5, policy="MlpPolicy", policy_kw
                 verbose=1, 
                 policy_kwargs=policy_kwargs, 
                 tensorboard_log=tensorboard_log,
+                # max_grad_norm=0.05,
+                n_steps=1,
             )
     elif algorithm == "A2C":
         model = A2C(
@@ -60,29 +64,14 @@ def get_model(algorithm, model_path, env, lr=1e-5, policy="MlpPolicy", policy_kw
             policy_kwargs=policy_kwargs, 
             tensorboard_log=tensorboard_log
         )
-    elif algorithm == "SAC":
-        model = SAC(
-            policy, 
-            env, 
-            learning_rate=lr, 
-            verbose=1, 
-            tensorboard_log=tensorboard_log
-        )
-    elif algorithm == "DQN":
-        model = DQN(
-            policy, 
-            env, 
-            learning_rate=lr, 
-            verbose=1, 
-            tensorboard_log=tensorboard_log
-        )
     else:
         raise ValueError(f"Unsupported algorithm: {algorithm}")
     return model
 
+
 def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
                   torch_num_threads=1, iteration_training_steps=1,
-                  model_path=None, num_envs=64):
+                  model_path=None, num_envs=2):
     base_dir = "data/"
     time_stamp = datetime.now().strftime("%d_%m_%Y__%H_%M_%S")
     base_path = os.path.join(base_dir, "17", algorithm, time_stamp)

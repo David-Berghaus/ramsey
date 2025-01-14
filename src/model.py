@@ -87,6 +87,9 @@ class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
     def forward(self, observations):
         node_embeddings_1 = self.node_embeddings(True) #[n, embed_dim]
         node_embeddings_2 = self.node_embeddings(False) #[n, embed_dim]
+        # print(node_embeddings_1)
+        if torch.isnan(node_embeddings_1).any() or torch.isnan(node_embeddings_2).any():
+            breakpoint()
         
         graph_embeddings = []
         cliques_r_batch, cliques_b_batch, adj_matrix_batch = [], [], []
@@ -99,12 +102,18 @@ class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
         
         clique_embeddings_1, clique_masks_batch_1 = self.clique_mean_encoder(True, node_embeddings_1, cliques_r_batch) # [batch_size, clique_attention_context_len, embed_dim], [batch_size, clique_attention_context_len]    
         clique_embeddings_2, clique_masks_batch_2 = self.clique_mean_encoder(False, node_embeddings_2, cliques_b_batch) # [batch_size, clique_attention_context_len, embed_dim], [batch_size, clique_attention_context_len]
+        if torch.isnan(clique_embeddings_1).any() or torch.isnan(clique_embeddings_2).any():
+            breakpoint()
         
         cliques_embeddings_1 = self.cliques_attention_encoder(True, clique_embeddings_1, clique_masks_batch_1) # [batch_size, embed_dim]cliques_embeddings_1 = self.cliques_attention_encoder(False, clique_embeddings_2, clique_masks_batch_2) # [batch_size, embed_dim]
         cliques_embeddings_2 = self.cliques_attention_encoder(False, clique_embeddings_2, clique_masks_batch_2) # [batch_size, embed_dim]
+        if torch.isnan(cliques_embeddings_1).any() or torch.isnan(cliques_embeddings_2).any():
+            breakpoint()
 
         graph_edge_conv_embedding_1 = self.graph_edge_conv_encoder(True, node_embeddings_1, adj_matrix_batch) # [batch_size, embed_dim]
         graph_edge_conv_embedding_2 = self.graph_edge_conv_encoder(False, node_embeddings_2, adj_matrix_batch) # [batch_size, embed_dim]
+        if torch.isnan(graph_edge_conv_embedding_1).any() or torch.isnan(graph_edge_conv_embedding_2).any():
+            breakpoint()
         
         graph_embedding_1 = self.graph_embeddings(True, cliques_embeddings_1, graph_edge_conv_embedding_1) # [batch_size, embed_dim]
         graph_embedding_2 = self.graph_embeddings(False, cliques_embeddings_2, graph_edge_conv_embedding_2) # [batch_size, embed_dim]
@@ -149,8 +158,9 @@ class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
             adj_tilde_batch = 1 - adj_matrix_batch
         degree_matrix_batch = torch.sum(adj_tilde_batch, dim=1)
         degree_matrix_batch = torch.diag_embed(degree_matrix_batch + 1e-8)
-        degree_matrix_batch = torch.inverse(degree_matrix_batch)
+        degree_matrix_batch = torch.inverse(torch.sqrt(degree_matrix_batch))
         normalized_adj_matrix_batch = torch.matmul(degree_matrix_batch, adj_tilde_batch)
+        normalized_adj_matrix_batch = torch.matmul(normalized_adj_matrix_batch, degree_matrix_batch)
         graph_embeddings = torch.matmul(normalized_adj_matrix_batch, node_embeddings)
         if use_r:
             graph_embeddings = self.graph_conv_downward_projection_1(graph_embeddings.flatten(1))

@@ -50,10 +50,12 @@ class AdjacencyMatrixFlippingEnv(gym.Env):
         # Compute the new score after the agent's action
         score, cliques_r, cliques_b, is_connected = get_score_and_cliques(G, self.r, self.b, self.not_connected_punishment)
         
+        truncated = False
         if not is_connected:
             # Apply a strong negative reward if the graph is disconnected
             reward = self.not_connected_punishment
             done = True
+            truncated = True
         else:
             if not done:        
                 reward = score - self.previous_score
@@ -78,8 +80,11 @@ class AdjacencyMatrixFlippingEnv(gym.Env):
             'reward': reward,
             'best_score': self.best_recorded_score
         }
+        
+        if done:
+            info['end_score'] = score
     
-        return self.observation_space_np, reward, done, False, info
+        return self.observation_space_np, reward, done, truncated, info
       
     def reset(self, **kwargs):
         # Reset the environment to a random one
