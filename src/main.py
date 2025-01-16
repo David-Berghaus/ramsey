@@ -128,7 +128,8 @@ def train_model(model_id, lr=5e-5, policy="MlpPolicy", algorithm="PPO",
             reset_num_timesteps=False, 
             callback=callback,
         )
-        model.save(os.path.join(base_path, f"model_{model_id}_{iteration_count}.zip"))
+        if iteration_count%1000 == 0:
+            model.save(os.path.join(base_path, f"model_{model_id}_{iteration_count}.zip"))
         iteration_count += 1
 
 
