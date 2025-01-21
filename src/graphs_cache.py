@@ -17,21 +17,6 @@ def hash_tensor(tensor):
     hash_object.update(tensor_bytes)
     return hash_object.hexdigest()
 
-def connect_graph(G):
-    # Get the connected components of the graph
-    components = list(nx.connected_components(G))
-    
-    # Iterate through components and connect them
-    for i in range(len(components) - 1):
-        # Take a node from the current component and the next component
-        node_from_current = next(iter(components[i]))
-        node_from_next = next(iter(components[i + 1]))
-        
-        # Add an edge between these nodes
-        G.add_edge(node_from_current, node_from_next)
-    
-    return G
-
 class GraphsCache:
     def __init__(self, max_size):
         self.cache = {}
@@ -44,9 +29,6 @@ class GraphsCache:
             return self.cache[key]
         G = obs_space_to_graph(observation_space, n)
         _, cliques_r, cliques_b, is_connected = get_score_and_cliques(G, r, b, -1000)
-        if not is_connected: # Fix graph to ensure stability. But we punish the network later
-            G = connect_graph(G)
-            _, cliques_r, cliques_b, _ = get_score_and_cliques(G, r, b, -1000)
         adj_matrix = adjacency_matrix(G).toarray()
         self.put(key, (cliques_r, cliques_b, adj_matrix))
         return cliques_r, cliques_b, adj_matrix

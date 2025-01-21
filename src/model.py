@@ -156,9 +156,11 @@ class NodeMeanPoolCliqueAttentionFeatureExtractor(BaseFeaturesExtractor):
             adj_tilde_batch = adj_matrix_batch + torch.eye(self.n, device=self.device, dtype=torch.float32)
         else:
             adj_tilde_batch = 1 - adj_matrix_batch
-        degree_matrix_batch = torch.sum(adj_tilde_batch, dim=1)
-        degree_matrix_batch = torch.diag_embed(degree_matrix_batch + 1e-8)
-        degree_matrix_batch = torch.inverse(torch.sqrt(degree_matrix_batch))
+        degree_matrix_diag = torch.sum(adj_tilde_batch, dim=1)
+        # Add a small epsilon for numerical stability
+        degree_matrix_diag += 1e-8
+        # Compute the reciprocal of the square root directly
+        degree_matrix_batch = torch.diag_embed(1.0 / torch.sqrt(degree_matrix_diag))
         normalized_adj_matrix_batch = torch.matmul(degree_matrix_batch, adj_tilde_batch)
         normalized_adj_matrix_batch = torch.matmul(normalized_adj_matrix_batch, degree_matrix_batch)
         graph_embeddings = torch.matmul(normalized_adj_matrix_batch, node_embeddings)

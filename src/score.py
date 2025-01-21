@@ -18,9 +18,29 @@ def get_cliques_and_count(G_nx, k): #See: https://stackoverflow.com/a/58782120
 
 def get_score_and_cliques(G_nx, r, b, not_connected_punishment):
     G_complement = complement(G_nx)
-    if not is_connected(G_nx) or not is_connected(G_complement):
-        return not_connected_punishment, [], [], False
+    graphs_are_connected = True
+    if not is_connected(G_nx):
+        graphs_are_connected = False
+        G_nx = connect_graph(G_nx) # Artificially connect the graph to ensure stability. But we will punish the network later
+    if not is_connected(G_complement):
+        graphs_are_connected = False
+        G_complement = connect_graph(G_complement) # Artificially connect the graph to ensure stability. But we will punish the network later
     cliques_r, count_r = get_cliques_and_count(G_nx, r)
     cliques_b, count_b = get_cliques_and_count(G_complement, b)
-    score = -(count_r + count_b)
-    return score, cliques_r, cliques_b, True
+    score = -(count_r + count_b) if graphs_are_connected else not_connected_punishment
+    return score, cliques_r, cliques_b, graphs_are_connected
+
+def connect_graph(G):
+    # Get the connected components of the graph
+    components = list(nx.connected_components(G))
+    
+    # Iterate through components and connect them
+    for i in range(len(components) - 1):
+        # Take a node from the current component and the next component
+        node_from_current = next(iter(components[i]))
+        node_from_next = next(iter(components[i + 1]))
+        
+        # Add an edge between these nodes
+        G.add_edge(node_from_current, node_from_next)
+    
+    return G
