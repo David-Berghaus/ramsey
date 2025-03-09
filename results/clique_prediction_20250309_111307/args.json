@@ -1,0 +1,13 @@
+{
+    "n_samples": 300,
+    "n_vertices": 17,
+    "batch_size": 32,
+    "epochs": 5,
+    "lr": 0.001,
+    "output_dir": "results",
+    "seed": 42,
+    "custom_only": false,
+    "mlp_only": true,
+    "measure_time": false,
+    "features_dim": 256
+}

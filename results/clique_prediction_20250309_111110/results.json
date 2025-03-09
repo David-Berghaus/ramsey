@@ -1,0 +1,43 @@
+{
+    "custom_model": {
+        "MSE": 19.552444458007812,
+        "MAE": 4.3792524337768555,
+        "Training Time (seconds)": 13.838469982147217,
+        "Epochs": 1,
+        "Learning Rate": 0.001,
+        "Batch Size": 32,
+        "Features Dim": 256,
+        "Ramsey Graphs Analysis": [
+            {
+                "graph_name": "4-Clique Graph",
+                "actual": [
+                    4,
+                    14
+                ],
+                "predicted": [
+                    0.8082831501960754,
+                    0.4380146563053131
+                ],
+                "absolute_error": [
+                    3.1917168498039246,
+                    13.561985343694687
+                ]
+            },
+            {
+                "graph_name": "Random Graph",
+                "actual": [
+                    6,
+                    5
+                ],
+                "predicted": [
+                    0.8781024813652039,
+                    0.4760311543941498
+                ],
+                "absolute_error": [
+                    5.121897518634796,
+                    4.52396884560585
+                ]
+            }
+        ]
+    }
+}

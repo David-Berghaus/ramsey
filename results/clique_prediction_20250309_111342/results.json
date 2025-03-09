@@ -1,0 +1,12 @@
+{
+    "Custom Model": {
+        "MSE": 0.94052454829216,
+        "MAE": 0.7292268872261047,
+        "Training Time (epochs)": 5
+    },
+    "MLP Model": {
+        "MSE": 1.1352425813674927,
+        "MAE": 0.8784638047218323,
+        "Training Time (epochs)": 5
+    }
+}
