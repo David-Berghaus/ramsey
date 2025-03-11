@@ -341,7 +341,7 @@ def plot_training_curves(model_losses, output_dir):
     plt.grid(True)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'training_curves_comparison.png'))
+    plt.savefig(os.path.join(output_dir, 'training_curves_comparison.pdf'))
     plt.close()
 
 def plot_metrics_comparison(model_metrics, output_dir):
@@ -381,7 +381,7 @@ def plot_metrics_comparison(model_metrics, output_dir):
     plt.ylabel('Error')
     plt.grid(True, axis='y')
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'model_metrics_comparison.png'))
+    plt.savefig(os.path.join(output_dir, 'model_metrics_comparison.pdf'))
     plt.close()
 
 def evaluate_on_test_set(models, test_loader, device, output_dir):
@@ -452,7 +452,7 @@ def evaluate_on_test_set(models, test_loader, device, output_dir):
     plt.grid(True)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'predictions_comparison.png'))
+    plt.savefig(os.path.join(output_dir, 'predictions_comparison.pdf'))
     plt.close()
     
     return results
@@ -543,7 +543,7 @@ def plot_predictions_from_runs(run_dirs, output_dir):
     for model_type, run_dir in run_dirs.items():
         # Find prediction plot files
         plot_dir = os.path.join(run_dir, 'plots')
-        pred_plots = glob.glob(os.path.join(plot_dir, '*_predictions.png'))
+        pred_plots = glob.glob(os.path.join(plot_dir, '*_predictions.pdf'))
         
         if pred_plots:
             # Just mention we found the plots, but we're not actually loading the images
@@ -557,7 +557,7 @@ def plot_predictions_from_runs(run_dirs, output_dir):
                 "\n".join([f"{model}: {dir}" for model, dir in run_dirs.items()]),
                 ha='center', va='center', fontsize=12)
     
-    plt.savefig(os.path.join(output_dir, 'predictions_reference.png'))
+    plt.savefig(os.path.join(output_dir, 'predictions_reference.pdf'))
     plt.close()
 
 if __name__ == "__main__":

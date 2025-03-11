@@ -231,9 +231,10 @@ def save_training_results(model, model_name, output_dir, train_losses, val_losse
     torch.save(model.state_dict(), weights_path)
     
     # Create a copy of the best model for easy loading
-    best_model_path = f"{model_name}_best.pt"
-    if os.path.exists(best_model_path):
-        shutil.copy(best_model_path, os.path.join(output_dir, "model_weights", f"{model_name}_best.pt"))
+    best_model_path = os.path.join(output_dir, "model_weights", f"{model_name}_best.pt")
+    if os.path.exists(f"{model_name}_best.pt"):
+        shutil.move(f"{model_name}_best.pt", best_model_path)
+        print(f"Moved best model to: {best_model_path}")
     
     # Save metrics to JSON
     metrics = {
@@ -282,10 +283,10 @@ def save_training_results(model, model_name, output_dir, train_losses, val_losse
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(os.path.join(plots_dir, f"{model_name}_training_curve.png"), dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(plots_dir, f"{model_name}_training_curve.pdf"), dpi=150, bbox_inches='tight')
     plt.close()
     
-    # Validate data shapes for predictions
+    # Create visualization of predictions vs. actual values
     print(f"Predictions shape: {predictions.shape}, Actual values shape: {actual.shape}")
     
     # Convert to numpy arrays if they aren't already
@@ -300,22 +301,15 @@ def save_training_results(model, model_name, output_dir, train_losses, val_losse
     if len(actual.shape) == 1 and len(actual) % 2 == 0:
         actual = actual.reshape(-1, 2)
     
-    # Scatter plot of predictions vs actual
     try:
         # Generate the visualization
-        fig = visualize_results(predictions, actual, model_name)
+        fig = visualize_results(predictions, actual, model_name, output_dir=plots_dir)
         
         # Save the plot in the correct directory
         if fig is not None:
-            plot_path = os.path.join(plots_dir, f"{model_name}_predictions.png")
+            plot_path = os.path.join(plots_dir, f"{model_name}_predictions.pdf")
             fig.savefig(plot_path, dpi=150, bbox_inches='tight')
             print(f"Predictions plot saved to: {plot_path}")
-        
-        # Check if a plot was generated directly by visualize_results
-        if os.path.exists(f"{model_name}_predictions.png"):
-            # Move it to the plots directory
-            shutil.move(f"{model_name}_predictions.png", os.path.join(plots_dir, f"{model_name}_predictions.png"))
-            print(f"Moved predictions plot to: {os.path.join(plots_dir, f'{model_name}_predictions.png')}")
     except Exception as e:
         print(f"Error creating prediction plot: {e}")
         import traceback
@@ -347,7 +341,8 @@ def train_model_with_tensorboard(model, train_loader, val_loader, output_dir, ar
         model, train_loader, val_loader, epochs=args.epochs,
         lr=args.lr, device=args.device, model_name=model_name,
         patience=args.patience, min_delta=args.min_delta, 
-        overfitting_threshold=args.overfitting_threshold
+        overfitting_threshold=args.overfitting_threshold,
+        output_dir=output_dir
     )
     
     # Log the losses
@@ -616,7 +611,7 @@ def main():
         plt.grid(True)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, "plots", "training_curves_comparison.png"))
+        plt.savefig(os.path.join(output_dir, "plots", "training_curves_comparison.pdf"))
         plt.close()
         
         # Plot comparative bar chart of MSE and MAE
@@ -636,7 +631,7 @@ def main():
         plt.xticks(indices, model_names)
         plt.legend()
         plt.grid(True, axis='y')
-        plt.savefig(os.path.join(output_dir, "plots", "model_performance_comparison.png"))
+        plt.savefig(os.path.join(output_dir, "plots", "model_performance_comparison.pdf"))
         plt.close()
         
         # Save comparison results in a single JSON file

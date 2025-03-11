@@ -256,7 +256,7 @@ def analyze_graph(graph_name, adjacency_matrix, models, n_vertices, output_dir):
     
     # Save figure
     os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(os.path.join(output_dir, f"{graph_name.replace(' ', '_')}.png"))
+    plt.savefig(os.path.join(output_dir, f"{graph_name.replace(' ', '_')}.pdf"))
     plt.close()
     
     # Return results
@@ -334,7 +334,7 @@ def main():
     axes[1].legend()
     
     plt.tight_layout()
-    plt.savefig(os.path.join(args.output_dir, "model_comparison.png"))
+    plt.savefig(os.path.join(args.output_dir, "model_comparison.pdf"))
     plt.close()
     
     # Print summary

@@ -548,26 +548,38 @@ class RamseyGraphGNNWithCliqueAttention(nn.Module):
 
 # Function to train a model
 def train_model(model, train_loader, val_loader, epochs=10, lr=0.001, device='cpu', model_name="model",
-               patience=5, min_delta=0.001, overfitting_threshold=3):
+               patience=5, min_delta=0.001, overfitting_threshold=3, output_dir=None):
     """
-    Train a model for predicting clique sizes with adaptive termination.
+    Train the model with early stopping.
     
     Args:
-        model (nn.Module): The model to train
-        train_loader (DataLoader): Training data loader
-        val_loader (DataLoader): Validation data loader
-        epochs (int): Maximum number of training epochs
-        lr (float): Learning rate
-        device (str): Device to train on ('cpu' or 'cuda')
-        model_name (str): Name for saving the model
-        patience (int): Number of epochs to wait for improvement before early stopping
-        min_delta (float): Minimum change in validation loss to be considered as improvement
-        overfitting_threshold (int): Number of consecutive epochs with improving train loss but worsening val loss
-        
+        model: The model to train
+        train_loader: DataLoader for training data
+        val_loader: DataLoader for validation data
+        epochs: Maximum number of epochs to train for
+        lr: Learning rate
+        device: Device to train on (cpu/cuda)
+        model_name: Name of the model for saving
+        patience: Number of epochs with no improvement after which training will be stopped
+        min_delta: Minimum change in validation loss to qualify as improvement
+        overfitting_threshold: Number of consecutive epochs showing overfitting before stopping
+        output_dir: Directory to save model weights and plots. If None, saves in the current directory.
+    
     Returns:
-        tuple: (trained_model, training_losses, validation_losses, early_stopped, stopped_reason)
+        model: Trained model
+        training_losses: List of training losses
+        validation_losses: List of validation losses
+        stopped_early: Boolean indicating if training stopped early
+        reason: Reason for stopping
     """
-    model = model.to(device)
+    # Create weights directory if output_dir is provided
+    weights_path = f"{model_name}_best.pt"
+    if output_dir is not None:
+        weights_dir = os.path.join(output_dir, "model_weights")
+        os.makedirs(weights_dir, exist_ok=True)
+        weights_path = os.path.join(weights_dir, f"{model_name}_best.pt")
+    
+    model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.MSELoss()
     
@@ -646,7 +658,7 @@ def train_model(model, train_loader, val_loader, epochs=10, lr=0.001, device='cp
             print(f"Epoch {epoch+1}/{epochs} - Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f} (improved)")
             best_val_loss = val_loss
             best_model_state = model.state_dict().copy()
-            torch.save(model.state_dict(), f"{model_name}_best.pt")
+            torch.save(model.state_dict(), weights_path)
             epochs_no_improve = 0
         else:
             print(f"Epoch {epoch+1}/{epochs} - Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f} (no improvement)")
@@ -760,7 +772,7 @@ def evaluate_model(model, test_loader, device='cpu'):
     return avg_mse, avg_mae, all_predictions, all_actual
 
 # Function to visualize results
-def visualize_results(predictions, actual_values, model_name="Model"):
+def visualize_results(predictions, actual_values, model_name="Model", output_dir=None):
     """
     Visualize the prediction results.
     
@@ -768,6 +780,7 @@ def visualize_results(predictions, actual_values, model_name="Model"):
         predictions (np.array): Predicted clique counts
         actual_values (np.array): Actual clique counts
         model_name (str): Name of the model for plot titles
+        output_dir (str): Directory to save the plot. If None, saves in the current directory or 'plots' folder.
     """
     try:
         # Convert inputs to numpy arrays if they aren't already
@@ -854,12 +867,17 @@ def visualize_results(predictions, actual_values, model_name="Model"):
         
         plt.tight_layout()
         
-        # Ensure the plots directory exists
-        if not os.path.exists('plots'):
-            os.makedirs('plots')
+        # Determine save path
+        if output_dir is not None:
+            # Ensure output directory exists
+            os.makedirs(output_dir, exist_ok=True)
+            save_path = os.path.join(output_dir, f"{model_name}_predictions.pdf")
+        else:
+            # Ensure the plots directory exists
+            if not os.path.exists('plots'):
+                os.makedirs('plots')
+            save_path = os.path.join('plots', f"{model_name}_predictions.pdf")
             
-        # Save with full path
-        save_path = f"{model_name}_predictions.png"
         print(f"  Saving plot to: {os.path.abspath(save_path)}")
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         
@@ -876,7 +894,15 @@ def visualize_results(predictions, actual_values, model_name="Model"):
         plt.text(0.5, 0.5, f"Error generating plot: {str(e)}", 
                  horizontalalignment='center', verticalalignment='center')
         plt.axis('off')
-        plt.savefig(f"{model_name}_error.png")
+        
+        # Save error plot to correct location
+        if output_dir is not None:
+            os.makedirs(output_dir, exist_ok=True)
+            error_path = os.path.join(output_dir, f"{model_name}_error.pdf")
+        else:
+            error_path = f"{model_name}_error.pdf"
+            
+        plt.savefig(error_path)
         plt.close()
         return None
     finally:

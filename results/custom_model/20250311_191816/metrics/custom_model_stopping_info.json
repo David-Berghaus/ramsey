@@ -1,0 +1,6 @@
+{
+    "early_stopped": false,
+    "stopped_reason": "Completed all epochs",
+    "epochs_completed": 2,
+    "max_epochs": 2
+}
