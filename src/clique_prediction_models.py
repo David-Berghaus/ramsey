@@ -235,7 +235,7 @@ class RamseyGraphGNNWithCliqueAttention(nn.Module):
     from NodeMeanPoolCliqueAttentionFeatureExtractor for Ramsey graph analysis.
     """
     def __init__(self, n_vertices=17, r=4, b=4, hidden_dim=64, num_layers=3, 
-                 clique_attention_context_len=8, node_attention_context_len=8):
+                 clique_attention_context_len=16, node_attention_context_len=8):
         super(RamseyGraphGNNWithCliqueAttention, self).__init__()
         self.n = n_vertices
         self.r = r
@@ -547,7 +547,7 @@ class RamseyGraphGNNWithCliqueAttention(nn.Module):
         return predictions
 
 # Function to train a model
-def train_model(model, train_loader, val_loader, epochs=10, lr=0.001, device='cpu', model_name="model",
+def train_model(model, train_loader, val_loader, epochs=10, lr=1e-4, device='cpu', model_name="model",
                patience=5, min_delta=0.001, overfitting_threshold=3, output_dir=None):
     """
     Train the model with early stopping.

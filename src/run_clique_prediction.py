@@ -29,7 +29,7 @@ def parse_args():
     # Dataset parameters
     parser.add_argument('--n_samples', type=int, default=5000, 
                         help='Number of graph samples to generate')
-    parser.add_argument('--batch_size', type=int, default=32, 
+    parser.add_argument('--batch_size', type=int, default=64, 
                         help='Batch size for training')
     
     # Model parameters
@@ -37,13 +37,13 @@ def parse_args():
                         help='Hidden dimension for neural network layers')
     parser.add_argument('--num_layers', type=int, default=3,
                         help='Number of layers in the GNN')
-    parser.add_argument('--clique_attention_context', type=int, default=20, 
+    parser.add_argument('--clique_attention_context', type=int, default=16, 
                         help='Context length for clique attention mechanism')
     
     # Training parameters
     parser.add_argument('--epochs', type=int, default=20, 
                         help='Number of training epochs')
-    parser.add_argument('--lr', type=float, default=0.001, 
+    parser.add_argument('--lr', type=float, default=1e-4, 
                         help='Learning rate')
     parser.add_argument('--patience', type=int, default=5,
                         help='Number of epochs to wait for improvement before early stopping')

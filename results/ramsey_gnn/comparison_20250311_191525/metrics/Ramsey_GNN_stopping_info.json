@@ -1,6 +1,0 @@
-{
-    "early_stopped": false,
-    "stopped_reason": "Completed all epochs",
-    "total_epochs_trained": 1,
-    "best_epoch": 1
-}
