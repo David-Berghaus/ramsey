@@ -8,6 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from scipy.special import comb
+import os
 
 # Import existing functionality
 from env import obs_space_to_graph, flattened_off_diagonal_to_adjacency_matrix
@@ -546,21 +547,25 @@ class RamseyGraphGNNWithCliqueAttention(nn.Module):
         return predictions
 
 # Function to train a model
-def train_model(model, train_loader, val_loader, epochs=10, lr=0.001, device='cpu', model_name="model"):
+def train_model(model, train_loader, val_loader, epochs=10, lr=0.001, device='cpu', model_name="model",
+               patience=5, min_delta=0.001, overfitting_threshold=3):
     """
-    Train a model for predicting clique sizes.
+    Train a model for predicting clique sizes with adaptive termination.
     
     Args:
         model (nn.Module): The model to train
         train_loader (DataLoader): Training data loader
         val_loader (DataLoader): Validation data loader
-        epochs (int): Number of training epochs
+        epochs (int): Maximum number of training epochs
         lr (float): Learning rate
         device (str): Device to train on ('cpu' or 'cuda')
         model_name (str): Name for saving the model
+        patience (int): Number of epochs to wait for improvement before early stopping
+        min_delta (float): Minimum change in validation loss to be considered as improvement
+        overfitting_threshold (int): Number of consecutive epochs with improving train loss but worsening val loss
         
     Returns:
-        tuple: (trained_model, training_losses, validation_losses)
+        tuple: (trained_model, training_losses, validation_losses, early_stopped, stopped_reason)
     """
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -571,6 +576,25 @@ def train_model(model, train_loader, val_loader, epochs=10, lr=0.001, device='cp
     
     best_val_loss = float('inf')
     best_model_state = None
+    
+    # Early stopping variables
+    epochs_no_improve = 0
+    early_stopped = False
+    stopped_reason = "Completed all epochs"
+    
+    # Overfitting detection variables
+    consecutive_overfitting = 0
+    
+    # Convergence detection variables
+    val_loss_change_history = []
+    convergence_window = 5  # Number of epochs to consider for convergence
+    convergence_threshold = 0.0005  # Maximum relative change in validation loss to consider converged
+    
+    print(f"\nStarting training with adaptive termination:")
+    print(f"- Max epochs: {epochs}")
+    print(f"- Early stopping patience: {patience}")
+    print(f"- Overfitting detection threshold: {overfitting_threshold} consecutive epochs")
+    print(f"- Convergence window: {convergence_window} epochs with less than {convergence_threshold*100:.4f}% change")
     
     for epoch in range(epochs):
         # Training phase
@@ -612,18 +636,69 @@ def train_model(model, train_loader, val_loader, epochs=10, lr=0.001, device='cp
         val_loss /= len(val_loader)
         validation_losses.append(val_loss)
         
-        print(f"Epoch {epoch+1}/{epochs} - Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+        # Calculate relative change in validation loss
+        if epoch > 0:
+            val_loss_change = abs((validation_losses[epoch] - validation_losses[epoch-1]) / validation_losses[epoch-1])
+            val_loss_change_history.append(val_loss_change)
         
-        # Save the best model
-        if val_loss < best_val_loss:
+        # Check for improvement
+        if val_loss < best_val_loss - min_delta:
+            print(f"Epoch {epoch+1}/{epochs} - Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f} (improved)")
             best_val_loss = val_loss
             best_model_state = model.state_dict().copy()
             torch.save(model.state_dict(), f"{model_name}_best.pt")
+            epochs_no_improve = 0
+        else:
+            print(f"Epoch {epoch+1}/{epochs} - Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f} (no improvement)")
+            epochs_no_improve += 1
+        
+        # Check for overfitting: training loss decreases while validation loss increases
+        if epoch > 0:
+            train_improved = training_losses[epoch] < training_losses[epoch-1]
+            val_worsened = validation_losses[epoch] > validation_losses[epoch-1]
+            
+            if train_improved and val_worsened:
+                consecutive_overfitting += 1
+                print(f"Warning: Possible overfitting detected ({consecutive_overfitting}/{overfitting_threshold})")
+            else:
+                consecutive_overfitting = 0
+        
+        # Check for convergence
+        if len(val_loss_change_history) >= convergence_window:
+            recent_changes = val_loss_change_history[-convergence_window:]
+            if all(change < convergence_threshold for change in recent_changes):
+                print(f"Convergence detected: Validation loss has stabilized over {convergence_window} epochs")
+                early_stopped = True
+                stopped_reason = f"Model converged (validation loss stabilized over {convergence_window} epochs)"
+                break
+        
+        # Early stopping check
+        if epochs_no_improve >= patience:
+            print(f"Early stopping triggered after {epoch+1} epochs due to no improvement for {patience} epochs")
+            early_stopped = True
+            stopped_reason = f"No improvement for {patience} epochs"
+            break
+            
+        # Overfitting check
+        if consecutive_overfitting >= overfitting_threshold:
+            print(f"Training stopped after {epoch+1} epochs due to overfitting detection")
+            early_stopped = True
+            stopped_reason = f"Overfitting detected for {overfitting_threshold} consecutive epochs"
+            break
+    
+    # Print final training status
+    if early_stopped:
+        print(f"\nTraining terminated early: {stopped_reason}")
+        print(f"Completed {epoch+1}/{epochs} epochs")
+    else:
+        print(f"\nCompleted all {epochs} epochs")
     
     # Load the best model
-    model.load_state_dict(best_model_state)
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        print(f"Loaded best model with validation loss: {best_val_loss:.6f}")
     
-    return model, training_losses, validation_losses
+    return model, training_losses, validation_losses, early_stopped, stopped_reason
 
 # Evaluation function
 def evaluate_model(model, test_loader, device='cpu'):
@@ -663,13 +738,26 @@ def evaluate_model(model, test_loader, device='cpu'):
             total_mse += mse.item()
             total_mae += mae.item()
             
-            all_predictions.extend(outputs.cpu().numpy())
-            all_actual.extend(max_clique_sizes.cpu().numpy())
+            # Append batch predictions and actuals
+            batch_predictions = outputs.cpu().numpy()
+            batch_actuals = max_clique_sizes.cpu().numpy()
+            
+            all_predictions.append(batch_predictions)
+            all_actual.append(batch_actuals)
     
     avg_mse = total_mse / len(test_loader)
     avg_mae = total_mae / len(test_loader)
     
-    return avg_mse, avg_mae, np.array(all_predictions), np.array(all_actual)
+    # Concatenate all batches into a single array
+    all_predictions = np.vstack(all_predictions)
+    all_actual = np.vstack(all_actual)
+    
+    print(f"Evaluation complete:")
+    print(f"  MSE: {avg_mse:.6f}, MAE: {avg_mae:.6f}")
+    print(f"  Predictions shape: {all_predictions.shape}")
+    print(f"  Actual values shape: {all_actual.shape}")
+    
+    return avg_mse, avg_mae, all_predictions, all_actual
 
 # Function to visualize results
 def visualize_results(predictions, actual_values, model_name="Model"):
@@ -681,24 +769,115 @@ def visualize_results(predictions, actual_values, model_name="Model"):
         actual_values (np.array): Actual clique counts
         model_name (str): Name of the model for plot titles
     """
-    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+    try:
+        # Convert inputs to numpy arrays if they aren't already
+        predictions = np.array(predictions)
+        actual_values = np.array(actual_values)
+        
+        # Print debug information
+        print(f"Visualizing results for {model_name}:")
+        print(f"  Predictions shape: {predictions.shape}")
+        print(f"  Actual values shape: {actual_values.shape}")
+        
+        # Ensure both arrays have the right shape
+        if len(predictions.shape) == 1:
+            predictions = predictions.reshape(-1, 2)
+        if len(actual_values.shape) == 1:
+            actual_values = actual_values.reshape(-1, 2)
+            
+        # Create figure and axes
+        fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+        
+        # Plot for original graph clique counts
+        axes[0].scatter(actual_values[:, 0], predictions[:, 0], alpha=0.5)
+        
+        # Compute the ranges with some safety checks
+        x_min = np.min(actual_values[:, 0])
+        x_max = np.max(actual_values[:, 0])
+        
+        # Add diagonal line
+        if x_min != x_max:  # Only plot line if there's a range
+            axes[0].plot([x_min, x_max], [x_min, x_max], 'r--')
+        
+        # Set buffer space around points
+        x_range = x_max - x_min
+        if x_range == 0:
+            x_range = 1.0  # Default range if all values are the same
+            
+        axes[0].set_xlim(x_min - 0.1 * x_range, x_max + 0.1 * x_range)
+        
+        # Set y-axis limits with safety check for identical values
+        y_min = np.min(predictions[:, 0])
+        y_max = np.max(predictions[:, 0])
+        y_range = y_max - y_min
+        if y_range == 0:
+            y_range = 1.0  # Default range if all values are the same
+        
+        axes[0].set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
+        
+        axes[0].set_xlabel('Actual 4-Clique Count (Original)')
+        axes[0].set_ylabel('Predicted 4-Clique Count')
+        axes[0].set_title(f'{model_name} - Original Graph')
+        axes[0].grid(True, linestyle='--', alpha=0.7)
+        
+        # Plot for complement graph clique counts
+        axes[1].scatter(actual_values[:, 1], predictions[:, 1], alpha=0.5)
+        
+        # Compute the ranges with some safety checks
+        x_min = np.min(actual_values[:, 1])
+        x_max = np.max(actual_values[:, 1])
+        
+        # Add diagonal line
+        if x_min != x_max:  # Only plot line if there's a range
+            axes[1].plot([x_min, x_max], [x_min, x_max], 'r--')
+            
+        # Set buffer space around points
+        x_range = x_max - x_min
+        if x_range == 0:
+            x_range = 1.0  # Default range if all values are the same
+            
+        axes[1].set_xlim(x_min - 0.1 * x_range, x_max + 0.1 * x_range)
+        
+        # Set y-axis limits with safety check for identical values
+        y_min = np.min(predictions[:, 1])
+        y_max = np.max(predictions[:, 1])
+        y_range = y_max - y_min
+        if y_range == 0:
+            y_range = 1.0  # Default range if all values are the same
+            
+        axes[1].set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
+        
+        axes[1].set_xlabel('Actual 4-Clique Count (Complement)')
+        axes[1].set_ylabel('Predicted 4-Clique Count')
+        axes[1].set_title(f'{model_name} - Complement Graph')
+        axes[1].grid(True, linestyle='--', alpha=0.7)
+        
+        plt.tight_layout()
+        
+        # Ensure the plots directory exists
+        if not os.path.exists('plots'):
+            os.makedirs('plots')
+            
+        # Save with full path
+        save_path = f"{model_name}_predictions.png"
+        print(f"  Saving plot to: {os.path.abspath(save_path)}")
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        
+        # Return fig for optional display in Jupyter notebooks or further modification
+        return fig
     
-    # Plot for original graph clique counts
-    axes[0].scatter(actual_values[:, 0], predictions[:, 0], alpha=0.5)
-    axes[0].plot([min(actual_values[:, 0]), max(actual_values[:, 0])],
-                [min(actual_values[:, 0]), max(actual_values[:, 0])], 'r--')
-    axes[0].set_xlabel('Actual 4-Clique Count (Original)')
-    axes[0].set_ylabel('Predicted 4-Clique Count')
-    axes[0].set_title(f'{model_name} - Original Graph')
-    
-    # Plot for complement graph clique counts
-    axes[1].scatter(actual_values[:, 1], predictions[:, 1], alpha=0.5)
-    axes[1].plot([min(actual_values[:, 1]), max(actual_values[:, 1])],
-                [min(actual_values[:, 1]), max(actual_values[:, 1])], 'r--')
-    axes[1].set_xlabel('Actual 4-Clique Count (Complement)')
-    axes[1].set_ylabel('Predicted 4-Clique Count')
-    axes[1].set_title(f'{model_name} - Complement Graph')
-    
-    plt.tight_layout()
-    plt.savefig(f"{model_name}_predictions.png")
-    plt.close() 
+    except Exception as e:
+        print(f"Error in visualize_results: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        # Create a simple error figure
+        plt.figure(figsize=(10, 6))
+        plt.text(0.5, 0.5, f"Error generating plot: {str(e)}", 
+                 horizontalalignment='center', verticalalignment='center')
+        plt.axis('off')
+        plt.savefig(f"{model_name}_error.png")
+        plt.close()
+        return None
+    finally:
+        plt.close() 

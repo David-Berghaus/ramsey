@@ -1,0 +1,6 @@
+{
+    "early_stopped": true,
+    "stopped_reason": "No improvement for 5 epochs",
+    "epochs_completed": 19,
+    "max_epochs": 1000
+}

@@ -45,6 +45,12 @@ def parse_args():
                         help='Number of training epochs')
     parser.add_argument('--lr', type=float, default=0.001, 
                         help='Learning rate')
+    parser.add_argument('--patience', type=int, default=5,
+                        help='Number of epochs to wait for improvement before early stopping')
+    parser.add_argument('--min_delta', type=float, default=0.001,
+                        help='Minimum change in validation loss to be considered as improvement')
+    parser.add_argument('--overfitting_threshold', type=int, default=3,
+                        help='Number of consecutive epochs with improving train loss but worsening val loss')
     
     # Execution options
     parser.add_argument('--no_gpu', action='store_true',
@@ -195,90 +201,127 @@ def analyze_performance_on_ramsey_graphs(models, n_vertices=17):
     return results
 
 def save_training_results(model, model_name, output_dir, train_losses, val_losses, 
-                         mse, mae, predictions, actual, args):
+                         mse, mae, predictions, actual, args, early_stopped=False, stopped_reason=""):
     """
-    Save all training results for a single model.
+    Save all training results, including model weights, metrics, and visualizations.
     
     Args:
         model (nn.Module): The trained model
         model_name (str): Name of the model
-        output_dir (str): Directory to save results
-        train_losses (list): Training losses per epoch
-        val_losses (list): Validation losses per epoch
-        mse (float): Mean squared error on test set
-        mae (float): Mean absolute error on test set
-        predictions (np.array): Predicted values
-        actual (np.array): Actual values
+        output_dir (str): Output directory
+        train_losses (list): Training losses
+        val_losses (list): Validation losses
+        mse (float): Mean Squared Error on test set
+        mae (float): Mean Absolute Error on test set
+        predictions (numpy.ndarray): Model predictions
+        actual (numpy.ndarray): Actual values
         args (argparse.Namespace): Command line arguments
+        early_stopped (bool): Whether training was terminated early
+        stopped_reason (str): Reason for early stopping if applicable
     """
-    # Create subdirectory paths
-    weights_dir = os.path.join(output_dir, "model_weights")
+    print(f"Saving results for {model_name}...")
+    
+    # Create plots directory if it doesn't exist
     plots_dir = os.path.join(output_dir, "plots")
-    metrics_dir = os.path.join(output_dir, "metrics")
+    if not os.path.exists(plots_dir):
+        os.makedirs(plots_dir)
     
-    # 1. Save model weights
-    torch.save(model.state_dict(), os.path.join(weights_dir, f"{model_name}_best.pt"))
+    # Save model weights
+    weights_path = os.path.join(output_dir, "model_weights", f"{model_name}_weights.pt")
+    torch.save(model.state_dict(), weights_path)
     
-    # 2. Save training curve
+    # Create a copy of the best model for easy loading
+    best_model_path = f"{model_name}_best.pt"
+    if os.path.exists(best_model_path):
+        shutil.copy(best_model_path, os.path.join(output_dir, "model_weights", f"{model_name}_best.pt"))
+    
+    # Save metrics to JSON
+    metrics = {
+        "test_mse": float(mse),
+        "test_mae": float(mae),
+        "epochs_trained": len(train_losses),
+        "final_train_loss": float(train_losses[-1]),
+        "final_val_loss": float(val_losses[-1]),
+        "best_val_loss": float(min(val_losses)),
+        "best_epoch": int(np.argmin(val_losses) + 1),
+        "early_stopped": early_stopped,
+        "stopped_reason": stopped_reason,
+        "training_parameters": {
+            "n_samples": args.n_samples,
+            "batch_size": args.batch_size,
+            "epochs": args.epochs,
+            "learning_rate": args.lr,
+            "patience": args.patience if hasattr(args, 'patience') else 5,
+            "min_delta": args.min_delta if hasattr(args, 'min_delta') else 0.001,
+            "overfitting_threshold": args.overfitting_threshold if hasattr(args, 'overfitting_threshold') else 3
+        }
+    }
+    
+    with open(os.path.join(output_dir, "metrics", f"{model_name}_metrics.json"), 'w') as f:
+        json.dump(metrics, f, indent=4)
+    
+    # Save losses to JSON
+    losses = {
+        "train_losses": [float(loss) for loss in train_losses],
+        "val_losses": [float(loss) for loss in val_losses]
+    }
+    
+    with open(os.path.join(output_dir, "metrics", f"{model_name}_losses.json"), 'w') as f:
+        json.dump(losses, f, indent=4)
+    
+    # Create and save plots
+    # Training curve
     plt.figure(figsize=(10, 6))
     plt.plot(train_losses, label='Train Loss')
     plt.plot(val_losses, label='Validation Loss')
+    plt.axvline(x=metrics["best_epoch"]-1, color='g', linestyle='--', 
+               label=f'Best Model (Epoch {metrics["best_epoch"]})')
     plt.xlabel('Epoch')
-    plt.ylabel('MSE Loss')
+    plt.ylabel('Loss (MSE)')
     plt.title(f'{model_name} Training Curve')
     plt.legend()
     plt.grid(True)
-    plt.savefig(os.path.join(plots_dir, f"{model_name}_training_curve.png"))
+    plt.tight_layout()
+    plt.savefig(os.path.join(plots_dir, f"{model_name}_training_curve.png"), dpi=150, bbox_inches='tight')
     plt.close()
     
-    # 3. Save performance metrics as JSON
-    performance = {
-        "model_name": model_name,
-        "test_mse": float(mse),
-        "test_mae": float(mae),
-        "training_epochs": args.epochs,
-        "learning_rate": float(args.lr),
-        "batch_size": args.batch_size,
-        "hidden_dim": args.hidden_dim,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
+    # Validate data shapes for predictions
+    print(f"Predictions shape: {predictions.shape}, Actual values shape: {actual.shape}")
     
-    metrics_file = os.path.join(metrics_dir, f"{model_name}_metrics.json")
-    with open(metrics_file, 'w') as f:
-        # Use a simpler approach for JSON serialization
-        f.write("{\n")
-        f.write(f'    "model_name": "{model_name}",\n')
-        f.write(f'    "test_mse": {float(mse)},\n')
-        f.write(f'    "test_mae": {float(mae)},\n')
-        f.write(f'    "training_epochs": {args.epochs},\n')
-        f.write(f'    "learning_rate": {float(args.lr)},\n')
-        f.write(f'    "batch_size": {args.batch_size},\n')
-        f.write(f'    "hidden_dim": {args.hidden_dim},\n')
-        f.write(f'    "timestamp": "{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}"\n')
-        f.write("}\n")
+    # Convert to numpy arrays if they aren't already
+    if isinstance(predictions, torch.Tensor):
+        predictions = predictions.cpu().numpy()
+    if isinstance(actual, torch.Tensor):
+        actual = actual.cpu().numpy()
     
-    # 4. Save all losses for potential reuse
-    losses_file = os.path.join(metrics_dir, f"{model_name}_losses.json")
-    with open(losses_file, 'w') as f:
-        # Convert numpy arrays to lists for JSON serialization
-        train_losses_list = [float(loss) for loss in train_losses]
-        val_losses_list = [float(loss) for loss in val_losses]
+    # Ensure shapes are correct (n_samples, 2)
+    if len(predictions.shape) == 1 and len(predictions) % 2 == 0:
+        predictions = predictions.reshape(-1, 2)
+    if len(actual.shape) == 1 and len(actual) % 2 == 0:
+        actual = actual.reshape(-1, 2)
+    
+    # Scatter plot of predictions vs actual
+    try:
+        # Generate the visualization
+        fig = visualize_results(predictions, actual, model_name)
         
-        # Use a simpler approach for JSON serialization
-        f.write("{\n")
-        f.write('    "train_losses": [\n        ')
-        f.write(',\n        '.join([str(loss) for loss in train_losses_list]))
-        f.write('\n    ],\n')
-        f.write('    "val_losses": [\n        ')
-        f.write(',\n        '.join([str(loss) for loss in val_losses_list]))
-        f.write('\n    ]\n')
-        f.write("}\n")
+        # Save the plot in the correct directory
+        if fig is not None:
+            plot_path = os.path.join(plots_dir, f"{model_name}_predictions.png")
+            fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+            print(f"Predictions plot saved to: {plot_path}")
+        
+        # Check if a plot was generated directly by visualize_results
+        if os.path.exists(f"{model_name}_predictions.png"):
+            # Move it to the plots directory
+            shutil.move(f"{model_name}_predictions.png", os.path.join(plots_dir, f"{model_name}_predictions.png"))
+            print(f"Moved predictions plot to: {os.path.join(plots_dir, f'{model_name}_predictions.png')}")
+    except Exception as e:
+        print(f"Error creating prediction plot: {e}")
+        import traceback
+        traceback.print_exc()
     
-    # 5. Save the actual vs. predicted plot
-    visualize_results(predictions, actual, model_name=model_name)
-    # Move the generated plot to the plots directory
-    if os.path.exists(f"{model_name}_predictions.png"):
-        shutil.move(f"{model_name}_predictions.png", os.path.join(plots_dir, f"{model_name}_predictions.png"))
+    print(f"Results for {model_name} saved to {output_dir}")
 
 def train_model_with_tensorboard(model, train_loader, val_loader, output_dir, args, model_name):
     """
@@ -293,16 +336,18 @@ def train_model_with_tensorboard(model, train_loader, val_loader, output_dir, ar
         model_name (str): Name of the model
         
     Returns:
-        tuple: (model, train_losses, val_losses)
+        tuple: (model, train_losses, val_losses, early_stopped, stopped_reason)
     """
     # Setup tensorboard writer
     tensorboard_dir = os.path.join(output_dir, "tensorboard")
     writer = SummaryWriter(tensorboard_dir)
     
     # Train the model with standard function, but add tensorboard logging
-    model, train_losses, val_losses = train_model(
+    model, train_losses, val_losses, early_stopped, stopped_reason = train_model(
         model, train_loader, val_loader, epochs=args.epochs,
-        lr=args.lr, device=args.device, model_name=model_name
+        lr=args.lr, device=args.device, model_name=model_name,
+        patience=args.patience, min_delta=args.min_delta, 
+        overfitting_threshold=args.overfitting_threshold
     )
     
     # Log the losses
@@ -310,10 +355,24 @@ def train_model_with_tensorboard(model, train_loader, val_loader, output_dir, ar
         writer.add_scalar(f'{model_name}/train_loss', train_losses[epoch], epoch)
         writer.add_scalar(f'{model_name}/val_loss', val_losses[epoch], epoch)
     
+    # Log early stopping information
+    writer.add_text('Training/early_stopped', str(early_stopped), 0)
+    writer.add_text('Training/stopped_reason', stopped_reason, 0)
+    
+    # Save early stopping information to a JSON file
+    stopping_info = {
+        'early_stopped': early_stopped,
+        'stopped_reason': stopped_reason,
+        'epochs_completed': len(train_losses),
+        'max_epochs': args.epochs
+    }
+    with open(os.path.join(output_dir, 'metrics', f'{model_name}_stopping_info.json'), 'w') as f:
+        json.dump(stopping_info, f, indent=4)
+    
     # Close the writer
     writer.close()
     
-    return model, train_losses, val_losses
+    return model, train_losses, val_losses, early_stopped, stopped_reason
 
 def main():
     args = parse_args()
@@ -370,7 +429,7 @@ def main():
         # Train MLP model
         print("\nTraining MLP Model...")
         model = MLPCliquePredictor(n_vertices=n_vertices)
-        model, train_losses, val_losses = train_model_with_tensorboard(
+        model, train_losses, val_losses, early_stopped, stopped_reason = train_model_with_tensorboard(
             model, train_loader, val_loader, output_dir, args, "mlp_model"
         )
         
@@ -380,7 +439,7 @@ def main():
         
         # Save all results
         save_training_results(model, "MLP_Model", output_dir, train_losses, val_losses, 
-                             mse, mae, predictions, actual, args)
+                             mse, mae, predictions, actual, args, early_stopped, stopped_reason)
         
         # Print results
         print(f"MLP Model - Test MSE: {mse:.4f}, Test MAE: {mae:.4f}")
@@ -400,7 +459,7 @@ def main():
         # Train Custom model
         print("\nTraining Custom Model...")
         model = CustomCliquePredictor(n_vertices=n_vertices, features_dim=256)
-        model, train_losses, val_losses = train_model_with_tensorboard(
+        model, train_losses, val_losses, early_stopped, stopped_reason = train_model_with_tensorboard(
             model, train_loader, val_loader, output_dir, args, "custom_model"
         )
         
@@ -410,7 +469,7 @@ def main():
         
         # Save all results
         save_training_results(model, "Custom_Model", output_dir, train_losses, val_losses, 
-                             mse, mae, predictions, actual, args)
+                             mse, mae, predictions, actual, args, early_stopped, stopped_reason)
         
         # Print results
         print(f"Custom Model - Test MSE: {mse:.4f}, Test MAE: {mae:.4f}")
@@ -435,7 +494,7 @@ def main():
             num_layers=args.num_layers,
             clique_attention_context_len=args.clique_attention_context
         )
-        model, train_losses, val_losses = train_model_with_tensorboard(
+        model, train_losses, val_losses, early_stopped, stopped_reason = train_model_with_tensorboard(
             model, train_loader, val_loader, output_dir, args, "ramsey_gnn"
         )
         
@@ -445,7 +504,7 @@ def main():
         
         # Save all results
         save_training_results(model, "Ramsey_GNN", output_dir, train_losses, val_losses, 
-                             mse, mae, predictions, actual, args)
+                             mse, mae, predictions, actual, args, early_stopped, stopped_reason)
         
         # Print results
         print(f"Ramsey Graph GNN with Clique Attention Model - Test MSE: {mse:.4f}, Test MAE: {mae:.4f}")
@@ -469,7 +528,7 @@ def main():
         # Train Custom model
         print("\nTraining Custom Model...")
         custom_model = CustomCliquePredictor(n_vertices=n_vertices, features_dim=256)
-        custom_model, custom_train_losses, custom_val_losses = train_model_with_tensorboard(
+        custom_model, custom_train_losses, custom_val_losses, custom_early_stopped, custom_stopped_reason = train_model_with_tensorboard(
             custom_model, train_loader, val_loader, output_dir, args, "custom_model"
         )
         
@@ -482,7 +541,7 @@ def main():
         # Save results
         save_training_results(custom_model, "Custom_Model", output_dir, custom_train_losses, 
                              custom_val_losses, custom_mse, custom_mae, custom_preds, 
-                             custom_actual, args)
+                             custom_actual, args, custom_early_stopped, custom_stopped_reason)
         
         all_models["Custom_Model"] = custom_model
         all_metrics["Custom_Model"] = {"mse": custom_mse, "mae": custom_mae}
@@ -490,7 +549,7 @@ def main():
         # Train MLP model
         print("\nTraining MLP Model...")
         mlp_model = MLPCliquePredictor(n_vertices=n_vertices)
-        mlp_model, mlp_train_losses, mlp_val_losses = train_model_with_tensorboard(
+        mlp_model, mlp_train_losses, mlp_val_losses, mlp_early_stopped, mlp_stopped_reason = train_model_with_tensorboard(
             mlp_model, train_loader, val_loader, output_dir, args, "mlp_model"
         )
         
@@ -503,7 +562,7 @@ def main():
         # Save results
         save_training_results(mlp_model, "MLP_Model", output_dir, mlp_train_losses, 
                              mlp_val_losses, mlp_mse, mlp_mae, mlp_preds, 
-                             mlp_actual, args)
+                             mlp_actual, args, mlp_early_stopped, mlp_stopped_reason)
         
         all_models["MLP_Model"] = mlp_model
         all_metrics["MLP_Model"] = {"mse": mlp_mse, "mae": mlp_mae}
@@ -516,7 +575,7 @@ def main():
             num_layers=args.num_layers,
             clique_attention_context_len=args.clique_attention_context
         )
-        ramsey_model, ramsey_train_losses, ramsey_val_losses = train_model_with_tensorboard(
+        ramsey_model, ramsey_train_losses, ramsey_val_losses, ramsey_early_stopped, ramsey_stopped_reason = train_model_with_tensorboard(
             ramsey_model, train_loader, val_loader, output_dir, args, "ramsey_gnn"
         )
         
@@ -529,7 +588,7 @@ def main():
         # Save results
         save_training_results(ramsey_model, "Ramsey_GNN", output_dir, ramsey_train_losses, 
                              ramsey_val_losses, ramsey_mse, ramsey_mae, ramsey_preds, 
-                             ramsey_actual, args)
+                             ramsey_actual, args, ramsey_early_stopped, ramsey_stopped_reason)
         
         all_models["Ramsey_GNN"] = ramsey_model
         all_metrics["Ramsey_GNN"] = {"mse": ramsey_mse, "mae": ramsey_mae}

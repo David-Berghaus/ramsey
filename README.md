@@ -95,10 +95,31 @@ Additional options for comparison:
   --num_layers NUM_LAYERS     Number of layers in the GNN
   --clique_attention_context CONTEXT
                              Context length for clique attention mechanism
-  --epochs EPOCHS             Number of training epochs
+  --epochs EPOCHS             Maximum number of training epochs
   --lr LR                     Learning rate
+  --patience PATIENCE         Number of epochs to wait for improvement before early stopping
+  --min_delta MIN_DELTA       Minimum change in validation loss to be considered as improvement
+  --overfitting_threshold THRESHOLD
+                             Number of consecutive epochs with improving train loss but worsening val loss
   --no_gpu                    Disable GPU usage even if available
   --output_dir OUTPUT_DIR     Directory to save results
+```
+
+### Adaptive Termination
+
+The training process now includes an adaptive termination mechanism that can automatically stop training when:
+
+1. **Early Stopping**: Training stops if there's no improvement in validation loss for a specified number of epochs (controlled by `--patience`).
+2. **Overfitting Detection**: Training stops if the model shows signs of overfitting for several consecutive epochs (controlled by `--overfitting_threshold`).
+3. **Convergence Detection**: Training stops when the validation loss stabilizes, indicating the model has converged.
+
+This eliminates the need to guess the optimal number of epochs for each model. The training will continue until one of these conditions is met or until the maximum number of epochs is reached.
+
+Example usage with adaptive termination parameters:
+
+```bash
+# Train with custom adaptive termination settings
+python src/run_clique_prediction.py --patience 10 --min_delta 0.0005 --overfitting_threshold 5
 ```
 
 ## Example
