@@ -2,16 +2,22 @@ import numpy as np
 import hashlib
 from networkx.linalg.graphmatrix import adjacency_matrix
 import networkx as nx
+import torch
 
 from score import get_score_and_cliques
 from env import obs_space_to_graph
 
 def hash_tensor(tensor):
-    # Ensure the tensor is on the CPU
-    if tensor.is_cuda:
-        tensor = tensor.cpu()
-    # Convert the tensor to bytes directly
-    tensor_bytes = tensor.detach().numpy().tobytes()
+    # Check if tensor is a torch tensor or numpy array
+    if isinstance(tensor, torch.Tensor):
+        # Ensure the tensor is on the CPU
+        if tensor.is_cuda:
+            tensor = tensor.cpu()
+        tensor_bytes = tensor.detach().numpy().tobytes()
+    else:
+        # Handle numpy arrays directly
+        tensor_bytes = tensor.tobytes()
+        
     # Create a hash object
     hash_object = hashlib.sha256()  # Use a faster hashing algorithm if needed
     hash_object.update(tensor_bytes)

@@ -13,7 +13,7 @@ from scipy.special import comb
 from env import obs_space_to_graph, flattened_off_diagonal_to_adjacency_matrix
 from score import get_score_and_cliques, get_cliques_and_count
 from model import NodeMeanPoolCliqueAttentionFeatureExtractor
-from graphs_cache import GraphsCache
+from graphs_cache import GraphsCache, hash_tensor
 
 # Custom Dataset class for graph adjacency matrices
 class GraphCliqueDataset(Dataset):
@@ -227,6 +227,290 @@ class MLPCliquePredictor(nn.Module):
         
         return torch.cat((clique_size_original, clique_size_complement), dim=1)
 
+# Model 3: GNN with Clique Attention from NodeMeanPoolCliqueAttentionFeatureExtractor
+class RamseyGraphGNNWithCliqueAttention(nn.Module):
+    """
+    An optimized hybrid model that combines traditional GNN layers with the clique attention mechanism
+    from NodeMeanPoolCliqueAttentionFeatureExtractor for Ramsey graph analysis.
+    """
+    def __init__(self, n_vertices=17, r=4, b=4, hidden_dim=64, num_layers=3, 
+                 clique_attention_context_len=8, node_attention_context_len=8):
+        super(RamseyGraphGNNWithCliqueAttention, self).__init__()
+        self.n = n_vertices
+        self.r = r
+        self.b = b
+        self.num_layers = num_layers
+        self.hidden_dim = hidden_dim
+        self.clique_attention_context_len = clique_attention_context_len
+        self.node_attention_context_len = node_attention_context_len
+        self.not_connected_punishment = -1000  # Same as in NodeMeanPoolCliqueAttentionFeatureExtractor
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.graphs_cache = GraphsCache(10000)
+        
+        # SIMPLIFIED GNN Node Feature Extraction - using fewer features for efficiency
+        # Initial node feature dimensions
+        node_feat_dim = 16
+        
+        # GNN layers
+        self.node_embedding = nn.Linear(1, node_feat_dim)  # Initial node feature embedding
+        
+        # Message passing layers
+        self.gnn_layers = nn.ModuleList()
+        for i in range(num_layers):
+            layer_input_dim = node_feat_dim if i == 0 else hidden_dim
+            self.gnn_layers.append(nn.Linear(layer_input_dim * 2, hidden_dim))  # Message function
+            
+        # Graph-level readout
+        self.graph_readout = nn.Linear(hidden_dim, hidden_dim)
+        
+        # SIMPLIFIED CLIQUE ATTENTION - inspired by the attention mechanism in the feature extractor
+        # but optimized for this specific task
+        
+        # Clique embedding layer
+        self.r_clique_embedding = nn.Linear(self.r, hidden_dim)
+        self.b_clique_embedding = nn.Linear(self.b, hidden_dim)
+        
+        # Attention mechanisms
+        self.r_query = nn.Linear(hidden_dim, hidden_dim)
+        self.r_key = nn.Linear(hidden_dim, hidden_dim)
+        self.r_value = nn.Linear(hidden_dim, hidden_dim)
+        
+        self.b_query = nn.Linear(hidden_dim, hidden_dim)
+        self.b_key = nn.Linear(hidden_dim, hidden_dim)
+        self.b_value = nn.Linear(hidden_dim, hidden_dim)
+        
+        # Downward projections for clique attention
+        self.r_downward = nn.Linear(clique_attention_context_len * hidden_dim, hidden_dim)
+        self.b_downward = nn.Linear(clique_attention_context_len * hidden_dim, hidden_dim)
+        
+        # Final prediction layers
+        self.final_r_projection = nn.Linear(hidden_dim * 2, hidden_dim)
+        self.final_b_projection = nn.Linear(hidden_dim * 2, hidden_dim)
+        
+        self.r_head = nn.Sequential(
+            nn.Linear(hidden_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+        )
+        
+        self.b_head = nn.Sequential(
+            nn.Linear(hidden_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+        )
+        
+        # Create a module for the nonlinearity used throughout
+        self.act = nn.ReLU()
+        
+        # Cache for graphs
+        self.n_entries = n_vertices * (n_vertices - 1) // 2
+    
+    def extract_node_features(self, adj_matrix):
+        """
+        Extract GNN node features from the adjacency matrix.
+        This simplified GNN aggregates messages from neighbors and updates node representations.
+        
+        Args:
+            adj_matrix (torch.Tensor): Adjacency matrix [n, n]
+            
+        Returns:
+            torch.Tensor: Node features tensor [n, hidden_dim]
+        """
+        n = adj_matrix.size(0)
+        
+        # Initial node features (just a single feature of 1.0 for each node)
+        node_features = torch.ones(n, 1, device=adj_matrix.device)
+        node_features = self.node_embedding(node_features)  # [n, node_feat_dim]
+        
+        # GNN message passing
+        for i, layer in enumerate(self.gnn_layers):
+            # Aggregate messages from neighbors
+            messages = []
+            for j in range(n):
+                # Get neighbors (where adjacency matrix entry is 1)
+                neighbors = (adj_matrix[j] == 1).nonzero(as_tuple=True)[0]
+                
+                if len(neighbors) > 0:
+                    # Aggregate neighbor features
+                    neighbor_feats = node_features[neighbors]
+                    neighbor_aggr = neighbor_feats.mean(dim=0)
+                else:
+                    # No neighbors - use zero vector
+                    neighbor_aggr = torch.zeros_like(node_features[0])
+                
+                # Concatenate node's own features with aggregated neighbor features
+                combined = torch.cat([node_features[j], neighbor_aggr])
+                messages.append(combined)
+            
+            # Stack messages and apply layer
+            stacked_messages = torch.stack(messages)
+            node_features = self.act(layer(stacked_messages))
+        
+        return node_features
+    
+    def forward(self, x):
+        """
+        Forward pass of the GNN with Clique Attention model.
+        
+        Args:
+            x (torch.Tensor): Batch of flattened adjacency matrices [batch_size, n_entries]
+            
+        Returns:
+            torch.Tensor: Predicted 4-clique counts [batch_size, 2]
+        """
+        batch_size = x.shape[0]
+        
+        # List to store per-graph embeddings
+        all_gnn_embeddings = []
+        r_attention_embeddings = []
+        b_attention_embeddings = []
+        
+        # Process each graph in the batch
+        for i in range(batch_size):
+            graph_vec = x[i]
+            
+            # Convert flattened representation to adjacency matrix
+            adj_mat = flattened_off_diagonal_to_adjacency_matrix(graph_vec, self.n)
+            adj_tensor = torch.tensor(adj_mat, dtype=torch.float32, device=x.device)
+            
+            # Get GNN node embeddings
+            node_embeddings = self.extract_node_features(adj_tensor)
+            
+            # Graph-level readout (mean pooling)
+            graph_embedding = node_embeddings.mean(dim=0)
+            graph_embedding = self.graph_readout(graph_embedding)
+            
+            # Store GNN embedding
+            all_gnn_embeddings.append(graph_embedding)
+            
+            # Get r-cliques
+            G = obs_space_to_graph(graph_vec.cpu().numpy(), self.n)
+            G_comp = nx.complement(G)
+            
+            # Use the cache to avoid recomputation
+            graph_key = hash_tensor(graph_vec.cpu().numpy())
+            if graph_key in self.graphs_cache.cache:
+                cliques_r, cliques_b, _ = self.graphs_cache.cache[graph_key]
+            else:
+                _, cliques_r, cliques_b, _ = get_score_and_cliques(G, self.r, self.b, self.not_connected_punishment)
+                self.graphs_cache.put(graph_key, (cliques_r, cliques_b, None))
+            
+            # Process r-cliques for original graph
+            r_clique_vectors = []
+            for clique in cliques_r:
+                if len(clique) >= self.r:
+                    # One-hot encode the clique nodes
+                    clique_vec = torch.zeros(self.n, device=x.device)
+                    clique_vec[list(clique)] = 1.0
+                    r_clique_vectors.append(clique_vec[:self.r])  # Truncate/pad to fixed size r
+            
+            if r_clique_vectors:
+                # Stack clique vectors and get embeddings
+                r_clique_stack = torch.stack(r_clique_vectors[:self.clique_attention_context_len])
+                
+                # Clique embedding
+                r_embedded = self.r_clique_embedding(r_clique_stack)
+                
+                # Self-attention mechanism
+                q = self.r_query(r_embedded)
+                k = self.r_key(r_embedded)
+                v = self.r_value(r_embedded)
+                
+                # Compute attention scores
+                scores = torch.matmul(q, k.transpose(-2, -1))
+                attention = torch.softmax(scores, dim=-1)
+                
+                # Apply attention
+                attn_out = torch.matmul(attention, v)
+                
+                # Flatten and project
+                attn_out_reshaped = attn_out.reshape(-1)
+                # Ensure we have the right dimensionality for r_downward
+                expected_dim = self.clique_attention_context_len * self.hidden_dim
+                if attn_out_reshaped.shape[0] != expected_dim:
+                    # Pad or truncate to match the expected dimensions
+                    if attn_out_reshaped.shape[0] < expected_dim:
+                        padding = torch.zeros(expected_dim - attn_out_reshaped.shape[0], device=x.device)
+                        attn_out_reshaped = torch.cat([attn_out_reshaped, padding])
+                    else:
+                        attn_out_reshaped = attn_out_reshaped[:expected_dim]
+                
+                r_graph_embed = self.r_downward(attn_out_reshaped)
+            else:
+                # If all cliques are masked, use zeros
+                r_graph_embed = torch.zeros(self.hidden_dim, device=x.device)
+            
+            r_attention_embeddings.append(r_graph_embed)
+            
+            # Process b-cliques for complement graph
+            b_clique_vectors = []
+            for clique in cliques_b:
+                if len(clique) >= self.b:
+                    # One-hot encode the clique nodes
+                    clique_vec = torch.zeros(self.n, device=x.device)
+                    clique_vec[list(clique)] = 1.0
+                    b_clique_vectors.append(clique_vec[:self.b])  # Truncate/pad to fixed size b
+            
+            if b_clique_vectors:
+                # Stack clique vectors and get embeddings
+                b_clique_stack = torch.stack(b_clique_vectors[:self.clique_attention_context_len])
+                
+                # Clique embedding
+                b_embedded = self.b_clique_embedding(b_clique_stack)
+                
+                # Self-attention mechanism
+                q = self.b_query(b_embedded)
+                k = self.b_key(b_embedded)
+                v = self.b_value(b_embedded)
+                
+                # Compute attention scores
+                scores = torch.matmul(q, k.transpose(-2, -1))
+                attention = torch.softmax(scores, dim=-1)
+                
+                # Apply attention
+                attn_out = torch.matmul(attention, v)
+                
+                # Flatten and project
+                attn_out_reshaped = attn_out.reshape(-1)
+                # Ensure we have the right dimensionality for b_downward
+                expected_dim = self.clique_attention_context_len * self.hidden_dim
+                if attn_out_reshaped.shape[0] != expected_dim:
+                    # Pad or truncate to match the expected dimensions
+                    if attn_out_reshaped.shape[0] < expected_dim:
+                        padding = torch.zeros(expected_dim - attn_out_reshaped.shape[0], device=x.device)
+                        attn_out_reshaped = torch.cat([attn_out_reshaped, padding])
+                    else:
+                        attn_out_reshaped = attn_out_reshaped[:expected_dim]
+                
+                b_graph_embed = self.b_downward(attn_out_reshaped)
+            else:
+                # If all cliques are masked, use zeros
+                b_graph_embed = torch.zeros(self.hidden_dim, device=x.device)
+            
+            b_attention_embeddings.append(b_graph_embed)
+        
+        # Stack the embeddings
+        gnn_embeddings = torch.stack(all_gnn_embeddings)
+        r_attention_embeddings = torch.stack(r_attention_embeddings)
+        b_attention_embeddings = torch.stack(b_attention_embeddings)
+        
+        # Combine GNN and attention embeddings
+        r_combined = torch.cat([gnn_embeddings, r_attention_embeddings], dim=1)
+        b_combined = torch.cat([gnn_embeddings, b_attention_embeddings], dim=1)
+        
+        # Project to final embeddings
+        r_embedding = self.final_r_projection(r_combined)
+        b_embedding = self.final_b_projection(b_combined)
+        
+        # Predict clique counts
+        r_counts = self.r_head(r_embedding)
+        b_counts = self.b_head(b_embedding)
+        
+        # Combine predictions
+        predictions = torch.cat([r_counts, b_counts], dim=1)
+        
+        return predictions
+
 # Function to train a model
 def train_model(model, train_loader, val_loader, epochs=10, lr=0.001, device='cpu', model_name="model"):
     """
@@ -383,119 +667,4 @@ def visualize_results(predictions, actual_values, model_name="Model"):
     
     plt.tight_layout()
     plt.savefig(f"{model_name}_predictions.png")
-    plt.close()
-
-# Main function to run the experiment
-def run_clique_prediction_experiment(n_samples=5000, batch_size=32, epochs=20, device='cpu'):
-    """
-    Run the full experiment comparing both models.
-    
-    Args:
-        n_samples (int): Number of graph samples to generate
-        batch_size (int): Batch size for training
-        epochs (int): Number of training epochs
-        device (str): Device to run on ('cpu' or 'cuda')
-        
-    Returns:
-        dict: Results dictionary with model performances
-    """
-    print("Generating dataset...")
-    adjacency_matrices, clique_counts = generate_clique_dataset(n_samples=n_samples)
-    
-    # Split into train, validation, and test sets
-    X_train_val, X_test, y_train_val, y_test = train_test_split(
-        adjacency_matrices, clique_counts, test_size=0.2, random_state=42
-    )
-    
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_train_val, y_train_val, test_size=0.25, random_state=42
-    )
-    
-    # Create datasets
-    train_dataset = GraphCliqueDataset(X_train, y_train)
-    val_dataset = GraphCliqueDataset(X_val, y_val)
-    test_dataset = GraphCliqueDataset(X_test, y_test)
-    
-    # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size)
-    
-    # Create and train the custom model
-    print("\nTraining Custom Model...")
-    custom_model = CustomCliquePredictor(n_vertices=17, features_dim=256)
-    custom_model, custom_train_losses, custom_val_losses = train_model(
-        custom_model, train_loader, val_loader, epochs=epochs, 
-        device=device, model_name="custom_model"
-    )
-    
-    # Create and train the MLP model
-    print("\nTraining MLP Model...")
-    mlp_model = MLPCliquePredictor(n_vertices=17)
-    mlp_model, mlp_train_losses, mlp_val_losses = train_model(
-        mlp_model, train_loader, val_loader, epochs=epochs,
-        device=device, model_name="mlp_model"
-    )
-    
-    # Evaluate both models
-    print("\nEvaluating Custom Model...")
-    custom_mse, custom_mae, custom_preds, custom_actual = evaluate_model(
-        custom_model, test_loader, device=device
-    )
-    
-    print("\nEvaluating MLP Model...")
-    mlp_mse, mlp_mae, mlp_preds, mlp_actual = evaluate_model(
-        mlp_model, test_loader, device=device
-    )
-    
-    # Visualize results
-    visualize_results(custom_preds, custom_actual, model_name="Custom_Model")
-    visualize_results(mlp_preds, mlp_actual, model_name="MLP_Model")
-    
-    # Plot training curves
-    plt.figure(figsize=(12, 5))
-    plt.subplot(1, 2, 1)
-    plt.plot(custom_train_losses, label='Custom Train')
-    plt.plot(custom_val_losses, label='Custom Val')
-    plt.plot(mlp_train_losses, label='MLP Train')
-    plt.plot(mlp_val_losses, label='MLP Val')
-    plt.xlabel('Epoch')
-    plt.ylabel('MSE Loss')
-    plt.title('Training Curves')
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig("training_curves.png")
-    plt.close()
-    
-    # Report results
-    results = {
-        'Custom Model': {
-            'MSE': custom_mse,
-            'MAE': custom_mae,
-            'Training Time (epochs)': epochs
-        },
-        'MLP Model': {
-            'MSE': mlp_mse,
-            'MAE': mlp_mae,
-            'Training Time (epochs)': epochs
-        }
-    }
-    
-    print("\n=== Results ===")
-    print(f"Custom Model - Test MSE: {custom_mse:.4f}, Test MAE: {custom_mae:.4f}")
-    print(f"MLP Model - Test MSE: {mlp_mse:.4f}, Test MAE: {mlp_mae:.4f}")
-    
-    return results
-
-if __name__ == "__main__":
-    # Set the device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    
-    # Run the experiment
-    results = run_clique_prediction_experiment(
-        n_samples=5000,
-        batch_size=32, 
-        epochs=20,
-        device=device
-    ) 
+    plt.close() 

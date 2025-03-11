@@ -1,0 +1,10 @@
+{
+    "model_name": "Ramsey_GNN",
+    "test_mse": 9348.2685546875,
+    "test_mae": 77.1153564453125,
+    "training_epochs": 1,
+    "learning_rate": 0.001,
+    "batch_size": 32,
+    "hidden_dim": 64,
+    "timestamp": "2025-03-11 13:41:17"
+}

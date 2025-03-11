@@ -1,0 +1,10 @@
+{
+    "model_name": "MLP_Model",
+    "test_mse": 9355.716796875,
+    "test_mae": 77.18114471435547,
+    "training_epochs": 1,
+    "learning_rate": 0.001,
+    "batch_size": 32,
+    "hidden_dim": 64,
+    "timestamp": "2025-03-11 13:40:31"
+}
