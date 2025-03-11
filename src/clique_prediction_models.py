@@ -304,11 +304,28 @@ class RamseyGraphGNNWithCliqueAttention(nn.Module):
         
         # Cache for graphs
         self.n_entries = n_vertices * (n_vertices - 1) // 2
+        
+        # Pre-compute indices for faster adjacency matrix building
+        self.row_indices, self.col_indices = [], []
+        idx = 0
+        for i in range(self.n):
+            for j in range(i + 1, self.n):
+                self.row_indices.append(i)
+                self.row_indices.append(j)
+                self.col_indices.append(j)
+                self.col_indices.append(i)
+                idx += 1
+        self.row_indices = torch.tensor(self.row_indices)
+        self.col_indices = torch.tensor(self.col_indices)
+        
+        # Pre-allocate tensors for padding attention mechanism
+        self.zero_hidden = torch.zeros(self.hidden_dim)
+        self.expected_attn_dim = self.clique_attention_context_len * self.hidden_dim
     
     def extract_node_features(self, adj_matrix):
         """
         Extract GNN node features from the adjacency matrix.
-        This simplified GNN aggregates messages from neighbors and updates node representations.
+        This optimized GNN aggregates messages from neighbors and updates node representations.
         
         Args:
             adj_matrix (torch.Tensor): Adjacency matrix [n, n]
@@ -322,31 +339,126 @@ class RamseyGraphGNNWithCliqueAttention(nn.Module):
         node_features = torch.ones(n, 1, device=adj_matrix.device)
         node_features = self.node_embedding(node_features)  # [n, node_feat_dim]
         
-        # GNN message passing
+        # GNN message passing - optimized implementation using sparse matrix operations
         for i, layer in enumerate(self.gnn_layers):
-            # Aggregate messages from neighbors
-            messages = []
-            for j in range(n):
-                # Get neighbors (where adjacency matrix entry is 1)
-                neighbors = (adj_matrix[j] == 1).nonzero(as_tuple=True)[0]
-                
-                if len(neighbors) > 0:
-                    # Aggregate neighbor features
-                    neighbor_feats = node_features[neighbors]
-                    neighbor_aggr = neighbor_feats.mean(dim=0)
-                else:
-                    # No neighbors - use zero vector
-                    neighbor_aggr = torch.zeros_like(node_features[0])
-                
-                # Concatenate node's own features with aggregated neighbor features
-                combined = torch.cat([node_features[j], neighbor_aggr])
-                messages.append(combined)
+            # Create a matrix of neighbor messages by using matrix multiplication
+            # Each row corresponds to a node and contains the sum of all neighbor features
+            neighbor_sums = torch.matmul(adj_matrix, node_features)
             
-            # Stack messages and apply layer
-            stacked_messages = torch.stack(messages)
-            node_features = self.act(layer(stacked_messages))
+            # Create a matrix where each row contains [node_feature, neighbor_sum]
+            # for the corresponding node
+            combined_features = torch.cat([node_features, neighbor_sums], dim=1)
+            
+            # Apply the layer
+            node_features = self.act(layer(combined_features))
         
         return node_features
+    
+    def build_adjacency_matrix_batch(self, graph_vec_batch):
+        """
+        Efficiently builds adjacency matrices for a batch of graph vectors using sparse operations.
+        
+        Args:
+            graph_vec_batch (torch.Tensor): Batch of graph vectors [batch_size, n_entries]
+            
+        Returns:
+            list: List of adjacency matrices as tensors
+        """
+        batch_size = graph_vec_batch.shape[0]
+        adj_matrices = []
+        
+        for b in range(batch_size):
+            graph_vec = graph_vec_batch[b]
+            values = torch.cat([graph_vec, graph_vec])  # Double the values for symmetric entries
+            indices = torch.stack([
+                self.row_indices.to(graph_vec.device), 
+                self.col_indices.to(graph_vec.device)
+            ])
+            
+            # Create sparse tensor and convert to dense
+            adj_matrix = torch.sparse.FloatTensor(
+                indices, values, (self.n, self.n)
+            ).to_dense()
+            
+            adj_matrices.append(adj_matrix)
+            
+        return adj_matrices
+    
+    def process_cliques(self, cliques, max_size, clique_embedding, query, key, value, downward, device):
+        """
+        Process cliques through the attention mechanism
+        
+        Args:
+            cliques (list): List of cliques
+            max_size (int): Maximum clique size (r or b)
+            clique_embedding (nn.Module): Embedding layer
+            query, key, value (nn.Module): Attention components
+            downward (nn.Module): Downward projection
+            device (torch.device): Device to use
+            
+        Returns:
+            torch.Tensor: Clique embedding
+        """
+        # Filter cliques by size
+        valid_cliques = [clique for clique in cliques if len(clique) >= max_size]
+        
+        if not valid_cliques:
+            return self.zero_hidden.to(device)
+        
+        # Limit number of cliques to process
+        valid_cliques = valid_cliques[:self.clique_attention_context_len]
+        
+        # Create one-hot encodings for cliques
+        clique_vectors = []
+        for clique in valid_cliques:
+            clique_vec = torch.zeros(max_size, device=device)
+            # Only include the first max_size nodes in the clique
+            clique_indices = list(clique)[:max_size]
+            # If the clique has fewer than max_size nodes, we use the available ones
+            clique_vec[:len(clique_indices)] = 1.0
+            clique_vectors.append(clique_vec)
+        
+        # Stack vectors
+        clique_stack = torch.stack(clique_vectors)
+        
+        # Embed cliques
+        embedded = clique_embedding(clique_stack)
+        
+        # Apply attention
+        q = query(embedded)
+        k = key(embedded)
+        v = value(embedded)
+        
+        # Compute attention scores
+        scores = torch.matmul(q, k.transpose(-2, -1)) / (self.hidden_dim ** 0.5)  # Scale by sqrt(dim)
+        attention = torch.softmax(scores, dim=-1)
+        
+        # Apply attention
+        attn_out = torch.matmul(attention, v)
+        
+        # Prepare for downward projection
+        num_cliques = attn_out.size(0)
+        
+        # Reshape and handle different dimensions
+        if num_cliques * self.hidden_dim == self.expected_attn_dim:
+            # Perfect fit
+            attn_flat = attn_out.reshape(-1)
+        elif num_cliques * self.hidden_dim < self.expected_attn_dim:
+            # Need padding
+            attn_flat = attn_out.reshape(-1)
+            padding = torch.zeros(
+                self.expected_attn_dim - attn_flat.size(0), 
+                device=device
+            )
+            attn_flat = torch.cat([attn_flat, padding])
+        else:
+            # Need truncation
+            attn_flat = attn_out[:self.clique_attention_context_len].reshape(-1)
+            if attn_flat.size(0) > self.expected_attn_dim:
+                attn_flat = attn_flat[:self.expected_attn_dim]
+        
+        # Apply downward projection
+        return downward(attn_flat)
     
     def forward(self, x):
         """
@@ -356,141 +468,63 @@ class RamseyGraphGNNWithCliqueAttention(nn.Module):
             x (torch.Tensor): Batch of flattened adjacency matrices [batch_size, n_entries]
             
         Returns:
-            torch.Tensor: Predicted 4-clique counts [batch_size, 2]
+            torch.Tensor: Predicted clique counts [batch_size, 2]
         """
         batch_size = x.shape[0]
+        device = x.device
         
-        # List to store per-graph embeddings
+        # Pre-compute adjacency matrices for the batch
+        adj_matrices = self.build_adjacency_matrix_batch(x)
+        
+        # Process all graphs in parallel where possible
         all_gnn_embeddings = []
-        r_attention_embeddings = []
-        b_attention_embeddings = []
-        
-        # Process each graph in the batch
         for i in range(batch_size):
-            graph_vec = x[i]
-            
-            # Convert flattened representation to adjacency matrix
-            adj_mat = flattened_off_diagonal_to_adjacency_matrix(graph_vec, self.n)
-            adj_tensor = torch.tensor(adj_mat, dtype=torch.float32, device=x.device)
-            
             # Get GNN node embeddings
-            node_embeddings = self.extract_node_features(adj_tensor)
+            node_embeddings = self.extract_node_features(adj_matrices[i])
             
             # Graph-level readout (mean pooling)
             graph_embedding = node_embeddings.mean(dim=0)
             graph_embedding = self.graph_readout(graph_embedding)
-            
-            # Store GNN embedding
             all_gnn_embeddings.append(graph_embedding)
+        
+        gnn_embeddings = torch.stack(all_gnn_embeddings)
+        
+        # Process cliques for each graph (this part is still sequential due to NetworkX dependency)
+        r_attention_embeddings = []
+        b_attention_embeddings = []
+        
+        for i in range(batch_size):
+            graph_vec = x[i]
             
-            # Get r-cliques
-            G = obs_space_to_graph(graph_vec.cpu().numpy(), self.n)
-            G_comp = nx.complement(G)
-            
-            # Use the cache to avoid recomputation
+            # Use cache to avoid recomputation
             graph_key = hash_tensor(graph_vec.cpu().numpy())
             if graph_key in self.graphs_cache.cache:
                 cliques_r, cliques_b, _ = self.graphs_cache.cache[graph_key]
             else:
+                # Convert to NetworkX graph
+                G = obs_space_to_graph(graph_vec.cpu().numpy(), self.n)
+                # Get cliques
                 _, cliques_r, cliques_b, _ = get_score_and_cliques(G, self.r, self.b, self.not_connected_punishment)
+                # Cache the results
                 self.graphs_cache.put(graph_key, (cliques_r, cliques_b, None))
             
-            # Process r-cliques for original graph
-            r_clique_vectors = []
-            for clique in cliques_r:
-                if len(clique) >= self.r:
-                    # One-hot encode the clique nodes
-                    clique_vec = torch.zeros(self.n, device=x.device)
-                    clique_vec[list(clique)] = 1.0
-                    r_clique_vectors.append(clique_vec[:self.r])  # Truncate/pad to fixed size r
-            
-            if r_clique_vectors:
-                # Stack clique vectors and get embeddings
-                r_clique_stack = torch.stack(r_clique_vectors[:self.clique_attention_context_len])
-                
-                # Clique embedding
-                r_embedded = self.r_clique_embedding(r_clique_stack)
-                
-                # Self-attention mechanism
-                q = self.r_query(r_embedded)
-                k = self.r_key(r_embedded)
-                v = self.r_value(r_embedded)
-                
-                # Compute attention scores
-                scores = torch.matmul(q, k.transpose(-2, -1))
-                attention = torch.softmax(scores, dim=-1)
-                
-                # Apply attention
-                attn_out = torch.matmul(attention, v)
-                
-                # Flatten and project
-                attn_out_reshaped = attn_out.reshape(-1)
-                # Ensure we have the right dimensionality for r_downward
-                expected_dim = self.clique_attention_context_len * self.hidden_dim
-                if attn_out_reshaped.shape[0] != expected_dim:
-                    # Pad or truncate to match the expected dimensions
-                    if attn_out_reshaped.shape[0] < expected_dim:
-                        padding = torch.zeros(expected_dim - attn_out_reshaped.shape[0], device=x.device)
-                        attn_out_reshaped = torch.cat([attn_out_reshaped, padding])
-                    else:
-                        attn_out_reshaped = attn_out_reshaped[:expected_dim]
-                
-                r_graph_embed = self.r_downward(attn_out_reshaped)
-            else:
-                # If all cliques are masked, use zeros
-                r_graph_embed = torch.zeros(self.hidden_dim, device=x.device)
-            
+            # Process r-cliques
+            r_graph_embed = self.process_cliques(
+                cliques_r, self.r, self.r_clique_embedding, 
+                self.r_query, self.r_key, self.r_value, 
+                self.r_downward, device
+            )
             r_attention_embeddings.append(r_graph_embed)
             
-            # Process b-cliques for complement graph
-            b_clique_vectors = []
-            for clique in cliques_b:
-                if len(clique) >= self.b:
-                    # One-hot encode the clique nodes
-                    clique_vec = torch.zeros(self.n, device=x.device)
-                    clique_vec[list(clique)] = 1.0
-                    b_clique_vectors.append(clique_vec[:self.b])  # Truncate/pad to fixed size b
-            
-            if b_clique_vectors:
-                # Stack clique vectors and get embeddings
-                b_clique_stack = torch.stack(b_clique_vectors[:self.clique_attention_context_len])
-                
-                # Clique embedding
-                b_embedded = self.b_clique_embedding(b_clique_stack)
-                
-                # Self-attention mechanism
-                q = self.b_query(b_embedded)
-                k = self.b_key(b_embedded)
-                v = self.b_value(b_embedded)
-                
-                # Compute attention scores
-                scores = torch.matmul(q, k.transpose(-2, -1))
-                attention = torch.softmax(scores, dim=-1)
-                
-                # Apply attention
-                attn_out = torch.matmul(attention, v)
-                
-                # Flatten and project
-                attn_out_reshaped = attn_out.reshape(-1)
-                # Ensure we have the right dimensionality for b_downward
-                expected_dim = self.clique_attention_context_len * self.hidden_dim
-                if attn_out_reshaped.shape[0] != expected_dim:
-                    # Pad or truncate to match the expected dimensions
-                    if attn_out_reshaped.shape[0] < expected_dim:
-                        padding = torch.zeros(expected_dim - attn_out_reshaped.shape[0], device=x.device)
-                        attn_out_reshaped = torch.cat([attn_out_reshaped, padding])
-                    else:
-                        attn_out_reshaped = attn_out_reshaped[:expected_dim]
-                
-                b_graph_embed = self.b_downward(attn_out_reshaped)
-            else:
-                # If all cliques are masked, use zeros
-                b_graph_embed = torch.zeros(self.hidden_dim, device=x.device)
-            
+            # Process b-cliques
+            b_graph_embed = self.process_cliques(
+                cliques_b, self.b, self.b_clique_embedding, 
+                self.b_query, self.b_key, self.b_value, 
+                self.b_downward, device
+            )
             b_attention_embeddings.append(b_graph_embed)
         
-        # Stack the embeddings
-        gnn_embeddings = torch.stack(all_gnn_embeddings)
+        # Stack embeddings
         r_attention_embeddings = torch.stack(r_attention_embeddings)
         b_attention_embeddings = torch.stack(b_attention_embeddings)
         
