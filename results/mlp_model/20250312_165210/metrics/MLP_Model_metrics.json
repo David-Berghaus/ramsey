@@ -1,0 +1,20 @@
+{
+    "test_mse": 935.2062021891276,
+    "test_mae": 22.75751829147339,
+    "epochs_trained": 6,
+    "final_train_loss": 942.9161121715199,
+    "final_val_loss": 927.0483754475912,
+    "best_val_loss": 921.3709513346354,
+    "best_epoch": 3,
+    "early_stopped": true,
+    "stopped_reason": "Overfitting detected for 3 consecutive epochs",
+    "training_parameters": {
+        "n_samples": 5000,
+        "batch_size": 64,
+        "epochs": 20,
+        "learning_rate": 0.0001,
+        "patience": 5,
+        "min_delta": 0.001,
+        "overfitting_threshold": 3
+    }
+}

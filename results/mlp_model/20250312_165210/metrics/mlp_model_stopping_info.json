@@ -1,0 +1,6 @@
+{
+    "early_stopped": true,
+    "stopped_reason": "Overfitting detected for 3 consecutive epochs",
+    "epochs_completed": 6,
+    "max_epochs": 20
+}

@@ -882,12 +882,23 @@ def visualize_results(predictions, actual_values, model_name="Model", output_dir
             predictions = predictions.reshape(-1, 2)
         if len(actual_values.shape) == 1:
             actual_values = actual_values.reshape(-1, 2)
+        
+        # Set larger font sizes for paper-quality plots
+        plt.rcParams.update({
+            'font.size': 14,             # Default font size
+            'axes.titlesize': 18,        # Title font size
+            'axes.labelsize': 16,        # Axis label font size
+            'xtick.labelsize': 14,       # X-tick label font size
+            'ytick.labelsize': 14,       # Y-tick label font size
+            'legend.fontsize': 14,       # Legend font size
+            'figure.titlesize': 20,      # Figure title font size
+        })
             
         # Create figure and axes
-        fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+        fig, axes = plt.subplots(1, 2, figsize=(16, 7))  # Slightly increased figure size
         
         # Plot for original graph clique counts
-        axes[0].scatter(actual_values[:, 0], predictions[:, 0], alpha=0.5)
+        axes[0].scatter(actual_values[:, 0], predictions[:, 0], alpha=0.5, s=60)  # Increased marker size
         
         # Compute the ranges with some safety checks
         x_min = np.min(actual_values[:, 0])
@@ -895,7 +906,7 @@ def visualize_results(predictions, actual_values, model_name="Model", output_dir
         
         # Add diagonal line
         if x_min != x_max:  # Only plot line if there's a range
-            axes[0].plot([x_min, x_max], [x_min, x_max], 'r--')
+            axes[0].plot([x_min, x_max], [x_min, x_max], 'r--', linewidth=2)  # Increased line width
         
         # Set buffer space around points
         x_range = x_max - x_min
@@ -913,13 +924,16 @@ def visualize_results(predictions, actual_values, model_name="Model", output_dir
         
         axes[0].set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
         
-        axes[0].set_xlabel('Actual 4-Clique Count (Original)')
-        axes[0].set_ylabel('Predicted 4-Clique Count')
-        axes[0].set_title(f'{model_name} - Original Graph')
+        axes[0].set_xlabel('Actual 4-Clique Count (Original)', fontsize=16, fontweight='bold')
+        axes[0].set_ylabel('Predicted 4-Clique Count', fontsize=16, fontweight='bold')
+        axes[0].set_title(f'{model_name} - Original Graph', fontsize=18, fontweight='bold')
         axes[0].grid(True, linestyle='--', alpha=0.7)
         
+        # Make tick labels larger and more visible
+        axes[0].tick_params(axis='both', which='major', labelsize=14, width=1.5, length=6)
+        
         # Plot for complement graph clique counts
-        axes[1].scatter(actual_values[:, 1], predictions[:, 1], alpha=0.5)
+        axes[1].scatter(actual_values[:, 1], predictions[:, 1], alpha=0.5, s=60)  # Increased marker size
         
         # Compute the ranges with some safety checks
         x_min = np.min(actual_values[:, 1])
@@ -927,7 +941,7 @@ def visualize_results(predictions, actual_values, model_name="Model", output_dir
         
         # Add diagonal line
         if x_min != x_max:  # Only plot line if there's a range
-            axes[1].plot([x_min, x_max], [x_min, x_max], 'r--')
+            axes[1].plot([x_min, x_max], [x_min, x_max], 'r--', linewidth=2)  # Increased line width
             
         # Set buffer space around points
         x_range = x_max - x_min
@@ -945,12 +959,16 @@ def visualize_results(predictions, actual_values, model_name="Model", output_dir
             
         axes[1].set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
         
-        axes[1].set_xlabel('Actual 4-Clique Count (Complement)')
-        axes[1].set_ylabel('Predicted 4-Clique Count')
-        axes[1].set_title(f'{model_name} - Complement Graph')
+        axes[1].set_xlabel('Actual 4-Clique Count (Complement)', fontsize=16, fontweight='bold')
+        axes[1].set_ylabel('Predicted 4-Clique Count', fontsize=16, fontweight='bold')
+        axes[1].set_title(f'{model_name} - Complement Graph', fontsize=18, fontweight='bold')
         axes[1].grid(True, linestyle='--', alpha=0.7)
         
-        plt.tight_layout()
+        # Make tick labels larger and more visible
+        axes[1].tick_params(axis='both', which='major', labelsize=14, width=1.5, length=6)
+        
+        # Adjust layout to make room for larger fonts
+        plt.tight_layout(pad=3.0)
         
         # Determine save path
         if output_dir is not None:
@@ -964,7 +982,7 @@ def visualize_results(predictions, actual_values, model_name="Model", output_dir
             save_path = os.path.join('plots', f"{model_name}_predictions.pdf")
             
         print(f"  Saving plot to: {os.path.abspath(save_path)}")
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')  # Increased DPI for higher quality
         
         # Return fig for optional display in Jupyter notebooks or further modification
         return fig
@@ -974,10 +992,11 @@ def visualize_results(predictions, actual_values, model_name="Model", output_dir
         import traceback
         traceback.print_exc()
         
-        # Create a simple error figure
+        # Create a simple error figure with larger text
         plt.figure(figsize=(10, 6))
         plt.text(0.5, 0.5, f"Error generating plot: {str(e)}", 
-                 horizontalalignment='center', verticalalignment='center')
+                 horizontalalignment='center', verticalalignment='center',
+                 fontsize=16)  # Larger error message font
         plt.axis('off')
         
         # Save error plot to correct location
@@ -987,7 +1006,7 @@ def visualize_results(predictions, actual_values, model_name="Model", output_dir
         else:
             error_path = f"{model_name}_error.pdf"
             
-        plt.savefig(error_path)
+        plt.savefig(error_path, dpi=300)  # Higher DPI for error plot too
         plt.close()
         return None
     finally:
