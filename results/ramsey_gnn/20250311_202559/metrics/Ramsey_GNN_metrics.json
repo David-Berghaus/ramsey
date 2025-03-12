@@ -1,0 +1,20 @@
+{
+    "test_mse": 228.2832936432402,
+    "test_mae": 8.975633051435826,
+    "epochs_trained": 10,
+    "final_train_loss": 241.72054731518958,
+    "final_val_loss": 226.46893827793963,
+    "best_val_loss": 226.40480655734822,
+    "best_epoch": 5,
+    "early_stopped": true,
+    "stopped_reason": "No improvement for 5 epochs",
+    "training_parameters": {
+        "n_samples": 50000,
+        "batch_size": 64,
+        "epochs": 1000,
+        "learning_rate": 0.0001,
+        "patience": 5,
+        "min_delta": 0.001,
+        "overfitting_threshold": 3
+    }
+}
