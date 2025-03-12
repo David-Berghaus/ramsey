@@ -8,7 +8,7 @@ import numpy as np
 import logging
 
 from env import AdjacencyMatrixFlippingEnv
-from model import NodeMeanPoolCliqueAttentionFeatureExtractor
+from model import RamseyGNNFeatureExtractor
 from callbacks import TensorboardCallback  # Import the custom callback
 
 def make_env(model_id, seed, base_path, env_id):
@@ -87,15 +87,15 @@ def train_model(model_id, lr=1e-3, policy="MlpPolicy", algorithm="PPO",
 
     policy_kwargs = dict(
         activation_fn=torch.nn.ReLU,
-        net_arch=dict(pi=[32, 32], vf=[32, 32]),
-        features_extractor_class=NodeMeanPoolCliqueAttentionFeatureExtractor,
+        net_arch=dict(pi=[], vf=[32, 32]),  # Empty policy network since our model does all the work
+        features_extractor_class=RamseyGNNFeatureExtractor,
         features_extractor_kwargs=dict(
-            n=17, r=4, b=4,
-            not_connected_punishment=-10000,
-            features_dim=64,
-            num_heads=1,
-            node_attention_context_len=8, 
-            clique_attention_context_len=64,
+            n_vertices=17, r=4, b=4,
+            hidden_dim=64,
+            num_layers=3,
+            clique_attention_context_len=16,
+            node_attention_context_len=8,
+            num_heads=2,
         )
     )
 

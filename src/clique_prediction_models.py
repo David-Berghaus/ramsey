@@ -13,7 +13,6 @@ import os
 # Import existing functionality
 from env import obs_space_to_graph, flattened_off_diagonal_to_adjacency_matrix
 from score import get_score_and_cliques, get_cliques_and_count
-from model import NodeMeanPoolCliqueAttentionFeatureExtractor
 from graphs_cache import GraphsCache, hash_tensor
 
 # Custom Dataset class for graph adjacency matrices
@@ -610,7 +609,7 @@ class RamseyGraphGNNWithCliqueAttention(nn.Module):
                 self.r_downward, device
             )
             
-            b_graph_embed = self.process_cliques(
+            b_clique_embed = self.process_cliques(
                 cliques_b, enhanced_node_embeddings, self.b,
                 self.b_query, self.b_key, self.b_value, 
                 self.b_downward, device
