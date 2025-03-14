@@ -30,7 +30,7 @@ def make_env(model_id, seed, base_path, env_id):
         return env
     return _init
 
-def get_model(algorithm, model_path, env, lr=1e-3, policy="MlpPolicy", policy_kwargs=None, tensorboard_log=None):
+def get_model(algorithm, model_path, env, lr=1e-4, policy="MlpPolicy", policy_kwargs=None, tensorboard_log=None):
     if algorithm == "PPO":
         if model_path and os.path.exists(model_path):
             print("Loading model from", model_path)
@@ -112,7 +112,7 @@ def train_model(model_id, lr=1e-3, policy="MlpPolicy", algorithm="PPO",
     torch.set_num_threads(torch_num_threads)
     
     # get model feature extractor
-    feature_extr: NodeMeanPoolCliqueAttentionFeatureExtractor = model.policy.features_extractor
+    feature_extr: RamseyGNNFeatureExtractor = model.policy.features_extractor
 
     # convert all parameters to trainable
     for name, param in feature_extr.named_parameters():

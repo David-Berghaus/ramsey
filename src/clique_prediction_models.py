@@ -158,7 +158,7 @@ class CustomCliquePredictor(nn.Module):
             from gymnasium import spaces
             observation_space = spaces.MultiBinary(self.n_entries)
             
-            self.feature_extractor = NodeMeanPoolCliqueAttentionFeatureExtractor(
+            self.feature_extractor = CustomCliquePredictor(
                 observation_space=observation_space,
                 n=self.n,
                 r=self.r,

@@ -27,7 +27,13 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Running the Comparison Experiment
+## RL
+
+```bash
+python src/main.py
+```
+
+### Running the Clique Comparison Experiment
 
 To run the full experiment comparing all models:
 
