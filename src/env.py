@@ -87,16 +87,15 @@ class AdjacencyMatrixFlippingEnv(gym.Env):
         return self.observation_space_np, reward, done, truncated, info
       
     def reset(self, **kwargs):
-        # Reset the environment to a random one
-        self.observation_space_np = np.random.randint(2, size=self.num_entries)
-        # Recalculate the score for the reset state
-        G = obs_space_to_graph(self.observation_space_np, self.n)
-        self.previous_score, _, _, _ = get_score_and_cliques(
-            G, self.r, self.b, self.not_connected_punishment
-        )
-            
+        # Reset to a random CONNECTED graph
+        is_connected = False
+        while not is_connected:
+            self.observation_space_np = np.random.randint(2, size=self.num_entries)
+            G = obs_space_to_graph(self.observation_space_np, self.n)
+            self.previous_score, _, _, is_connected = get_score_and_cliques(
+                G, self.r, self.b, self.not_connected_punishment
+            )
         self.step_count = 0
-    
         return self.observation_space_np, {}
         
     # def reset(self, **kwargs):

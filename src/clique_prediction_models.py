@@ -90,101 +90,7 @@ def generate_clique_dataset(n_vertices=17, n_samples=1000, seed=42):
     
     return np.array(flattened_matrices), np.array(clique_counts)
 
-# Model 1: Custom architecture adapted from the existing RL implementation
-class CustomCliquePredictor(nn.Module):
-    def __init__(self, n_vertices=17, features_dim=256):
-        super(CustomCliquePredictor, self).__init__()
-        
-        # Store features_dim as an instance variable
-        self.features_dim = features_dim
-        
-        # Create dummy observation space for the feature extractor
-        dummy_obs_space = None  # This will be handled in forward
-        
-        # Number of entries in flattened adjacency matrix
-        self.n_entries = n_vertices * (n_vertices - 1) // 2
-        
-        # Parameters for feature extractor
-        self.n = n_vertices
-        self.r = 4  # Parameter for R(4,4)
-        self.b = 4  # Parameter for R(4,4)
-        self.not_connected_punishment = -1000
-        self.node_attention_context_len = 20
-        self.clique_attention_context_len = 20
-        self.num_heads = 2
-        
-        # Create feature extractor (will be initialized in forward)
-        self.feature_extractor = None
-        
-        # Since the features_dim is split into two equal parts for R and B cliques
-        # Each regression head should take features_dim//2 as input
-        regressor_input_dim = features_dim // 2
-        
-        # Regression heads for clique size prediction
-        self.original_regressor = nn.Sequential(
-            nn.Linear(regressor_input_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1)
-        )
-        
-        self.complement_regressor = nn.Sequential(
-            nn.Linear(regressor_input_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1)
-        )
-        
-        self.graphs_cache = GraphsCache(10000)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    def forward(self, x):
-        """
-        Forward pass of the model.
-        
-        Args:
-            x (torch.Tensor): Batch of flattened adjacency matrices [batch_size, n_entries]
-            
-        Returns:
-            tuple: (clique_size_original, clique_size_complement)
-        """
-        batch_size = x.shape[0]
-        
-        # Initialize feature extractor if not already done
-        if self.feature_extractor is None:
-            # Dummy observation space
-            from gymnasium import spaces
-            observation_space = spaces.MultiBinary(self.n_entries)
-            
-            self.feature_extractor = CustomCliquePredictor(
-                observation_space=observation_space,
-                n=self.n,
-                r=self.r,
-                b=self.b,
-                not_connected_punishment=self.not_connected_punishment,
-                features_dim=self.features_dim,
-                num_heads=self.num_heads,
-                node_attention_context_len=self.node_attention_context_len,
-                clique_attention_context_len=self.clique_attention_context_len
-            ).to(self.device)
-        
-        # Use the feature extractor to get embeddings
-        # The output is of shape [batch_size, features_dim]
-        all_features = self.feature_extractor(x)
-        
-        # The first half of the features correspond to original graph
-        # The second half correspond to the complement graph
-        features_half = all_features.shape[1] // 2
-        
-        # Apply regression heads
-        clique_size_original = self.original_regressor(all_features[:, :features_half])
-        clique_size_complement = self.complement_regressor(all_features[:, features_half:])
-        
-        return torch.cat((clique_size_original, clique_size_complement), dim=1)
-
-# Model 2: MLP Baseline
+# Model 1: MLP Baseline
 class MLPCliquePredictor(nn.Module):
     def __init__(self, n_vertices=17, hidden_dims=[512, 512, 256, 128]):
         super(MLPCliquePredictor, self).__init__()
@@ -227,7 +133,7 @@ class MLPCliquePredictor(nn.Module):
         
         return torch.cat((clique_size_original, clique_size_complement), dim=1)
 
-# Model 3: GNN with Clique Attention from NodeMeanPoolCliqueAttentionFeatureExtractor
+# Model 2: GNN with Clique Attention from NodeMeanPoolCliqueAttentionFeatureExtractor
 class RamseyGraphGNNWithCliqueAttention(nn.Module):
     """
     An optimized hybrid model that combines traditional GNN layers with the clique attention mechanism
